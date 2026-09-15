@@ -1,0 +1,305 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #0b0b0d;
+  --surface: #111114;
+  --surface-2: #17171b;
+  --border: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.1);
+  --fg: #ede6d6;
+  --fg-muted: #8a857a;
+  --fg-subtle: #5b5750;
+  --gold: #d8b26a;
+  --gold-soft: rgba(216, 178, 106, 0.14);
+  --gold-strong: #efd9a8;
+  --ring: rgba(216, 178, 106, 0.35);
+
+  --block-1: #3a342a;
+  --block-2: #2f3a2e;
+  --block-3: #3a2f3a;
+  --block-4: #2c3440;
+  --block-5: #3f2f2a;
+  --block-6: #2f3a38;
+
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --elev-1: 0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.light {
+  --bg: #f7f4ee;
+  --surface: #ffffff;
+  --surface-2: #fbf8f2;
+  --border: rgba(11, 11, 13, 0.08);
+  --border-strong: rgba(11, 11, 13, 0.14);
+  --fg: #1a1a1f;
+  --fg-muted: #5a554b;
+  --fg-subtle: #8a857a;
+  --gold: #b7913f;
+  --gold-soft: rgba(183, 145, 63, 0.14);
+  --gold-strong: #8f6f2a;
+  --ring: rgba(183, 145, 63, 0.35);
+
+  --block-1: #ede3cf;
+  --block-2: #dfe6d6;
+  --block-3: #e6d8e0;
+  --block-4: #d5dde6;
+  --block-5: #e6d3ca;
+  --block-6: #d3e0dc;
+  --elev-1: 0 1px 0 rgba(255, 255, 255, 0.6) inset,
+    0 6px 20px rgba(11, 11, 13, 0.06);
+}
+
+@layer base {
+  html,
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-feature-settings: "cv11", "ss01", "ss03", "tnum";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    font-size: 14px;
+    line-height: 22px;
+  }
+  ::selection {
+    background: var(--gold-soft);
+    color: var(--fg);
+  }
+  *:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+    border: 2px solid var(--bg);
+  }
+}
+
+@layer components {
+  .wordmark {
+    font-weight: 300;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+  }
+  .display {
+    font-size: 40px;
+    line-height: 44px;
+    letter-spacing: -0.02em;
+    font-weight: 400;
+  }
+  .h1 {
+    font-size: 28px;
+    line-height: 32px;
+    letter-spacing: -0.015em;
+    font-weight: 500;
+  }
+  .h2 {
+    font-size: 20px;
+    line-height: 28px;
+    letter-spacing: -0.01em;
+    font-weight: 500;
+  }
+  .meta {
+    font-size: 12px;
+    line-height: 18px;
+    letter-spacing: 0.02em;
+    color: var(--fg-muted);
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+  }
+  .card-raised {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+  }
+  .divider {
+    height: 1px;
+    background: var(--border);
+    width: 100%;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 14px;
+    border-radius: var(--r-md);
+    font-size: 13px;
+    font-weight: 500;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--fg);
+    transition: all 160ms ease;
+  }
+  .btn:hover {
+    background: var(--surface-2);
+    border-color: var(--border-strong);
+  }
+  .btn-gold {
+    background: var(--gold);
+    color: #0b0b0d;
+    border-color: transparent;
+  }
+  .btn-gold:hover {
+    background: var(--gold-strong);
+  }
+  .btn-ghost {
+    border-color: transparent;
+    color: var(--fg-muted);
+  }
+  .btn-ghost:hover {
+    color: var(--fg);
+    background: var(--surface-2);
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--fg-muted);
+    background: var(--surface);
+  }
+  .input {
+    height: 38px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    padding: 0 12px;
+    color: var(--fg);
+    width: 100%;
+    font-size: 14px;
+  }
+  .input:focus {
+    outline: none;
+    border-color: var(--ring);
+  }
+  textarea.input {
+    height: auto;
+    padding: 10px 12px;
+    line-height: 20px;
+    resize: vertical;
+  }
+}
+
+@keyframes arc-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.04);
+  }
+}
+.arc-pulse {
+  animation: arc-pulse 3.2s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.fade-in {
+  animation: fade-in 260ms ease both;
+}
+
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.slide-in {
+  animation: slide-in 520ms cubic-bezier(0.2, 0.6, 0.2, 1) both;
+}
+
+@keyframes reveal-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.reveal-up {
+  animation: reveal-up 640ms cubic-bezier(0.2, 0.6, 0.2, 1) both;
+}
+
+@keyframes gold-line {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.gold-line {
+  transform-origin: left center;
+  animation: gold-line 800ms cubic-bezier(0.2, 0.6, 0.2, 1) both;
+}
+
+.deck-grid-bg {
+  background-image: linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 80px 80px;
+  background-position: -1px -1px;
+}
+
+.deck-radial {
+  background:
+    radial-gradient(1200px 700px at 82% 12%, rgba(216, 178, 106, 0.06), transparent 60%),
+    radial-gradient(900px 600px at 10% 90%, rgba(216, 178, 106, 0.04), transparent 60%);
+}
+
+.serif {
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino,
+    Georgia, serif;
+  font-feature-settings: "liga", "kern";
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arc-pulse,
+  .fade-in,
+  .slide-in,
+  .reveal-up,
+  .gold-line {
+    animation: none !important;
+  }
+}
