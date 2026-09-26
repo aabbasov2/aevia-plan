@@ -26,14 +26,18 @@ const RECURRENCES: { label: string; value: Recurrence["kind"] }[] = [
 export function CreateTaskModal({
   open,
   onOpenChange,
+  onCreated,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  onCreated?: () => void;
 }) {
   const createTask = useStore((s) => s.createTask);
+  const scheduleTaskAt = useStore((s) => s.scheduleTaskAt);
   const [title, setTitle] = useState("");
   const [duration, setDuration] = useState(60);
   const [deadline, setDeadline] = useState("");
+  const [scheduleAt, setScheduleAt] = useState("");
   const [project, setProject] = useState<ProjectKey>("work");
   const [recurrence, setRecurrence] = useState<Recurrence["kind"]>("none");
   const [notes, setNotes] = useState("");
@@ -42,23 +46,26 @@ export function CreateTaskModal({
 
   function submit() {
     if (!title.trim()) return;
-    createTask({
+    const taskId = createTask({
       title: title.trim(),
       durationMinutes: duration,
-      deadline: deadline ? new Date(`${deadline}T18:00:00`).toISOString() : undefined,
+      deadline: deadline ? new Date(deadline).toISOString() : undefined,
       recurrence: { kind: recurrence } as Recurrence,
       project,
       notes: notes.trim() || undefined,
       colorIndex: colorForProject(project),
     });
+    if (scheduleAt) scheduleTaskAt(taskId, new Date(scheduleAt).toISOString());
     reset();
     onOpenChange(false);
+    onCreated?.();
   }
 
   function reset() {
     setTitle("");
     setDuration(60);
     setDeadline("");
+    setScheduleAt("");
     setRecurrence("none");
     setNotes("");
     setProject("work");
@@ -66,11 +73,11 @@ export function CreateTaskModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6 fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 fade-in sm:p-6"
       onClick={() => onOpenChange(false)}
     >
       <div
-        className="card-raised w-full max-w-lg p-6 fade-in"
+        className="card-raised max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto p-5 fade-in sm:p-6"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-5 flex items-center justify-between">
@@ -120,10 +127,10 @@ export function CreateTaskModal({
             </div>
           </Field>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Deadline">
-              <input
-                type="date"
+            <input
+              type="datetime-local"
                 className="input"
                 value={deadline}
                 onChange={(e) => setDeadline(e.target.value)}
@@ -143,6 +150,15 @@ export function CreateTaskModal({
               </select>
             </Field>
           </div>
+
+          <Field label="Schedule at (optional)">
+            <input
+              type="datetime-local"
+              className="input"
+              value={scheduleAt}
+              onChange={(e) => setScheduleAt(e.target.value)}
+            />
+          </Field>
 
           <Field label="Repeat">
             <div className="flex flex-wrap gap-1.5">

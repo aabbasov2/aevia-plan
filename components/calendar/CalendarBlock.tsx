@@ -29,7 +29,7 @@ export function CalendarBlock({
       {...attributes}
       {...listeners}
       className={cn(
-        "absolute left-1 right-1 z-10 cursor-grab overflow-hidden rounded-md border-l-2 px-2 py-1.5 transition-shadow active:cursor-grabbing hover:shadow-elev",
+        "absolute left-1.5 right-1.5 z-10 cursor-grab overflow-hidden rounded-lg border border-white/[0.05] border-l-2 px-2.5 py-1.5 shadow-[0_4px_14px_rgba(0,0,0,0.18)] transition-all active:cursor-grabbing hover:-translate-y-px hover:border-white/[0.1] hover:shadow-elev",
         isDragging ? "opacity-40" : ""
       )}
       style={{
@@ -39,10 +39,12 @@ export function CalendarBlock({
         borderLeftColor: event.kind === "task" ? "var(--gold)" : "var(--border-strong)",
       }}
     >
-      <div className="truncate text-[12px] leading-4 text-fg">{event.title}</div>
-      <div className="mt-0.5 truncate text-[10.5px] leading-4 text-fg-muted" style={{ fontVariantNumeric: "tabular-nums" }}>
-        {formatRange(startMinutesInDay, event.durationMinutes)}
-      </div>
+      <div className="truncate text-[12px] font-medium leading-4 text-fg">{event.title}</div>
+      {height >= 34 && (
+        <div className="mt-0.5 truncate text-[10.5px] leading-4 text-fg-muted" style={{ fontVariantNumeric: "tabular-nums" }}>
+          {formatRange(startMinutesInDay, event.durationMinutes)}
+        </div>
+      )}
     </div>
   );
 }

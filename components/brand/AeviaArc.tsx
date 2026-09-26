@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { cn } from "@/lib/cn";
 
 type Props = {
@@ -10,7 +11,8 @@ type Props = {
 };
 
 export function AeviaArc({ size = 24, className, pulse = false, monochrome = false }: Props) {
-  const gradientId = `arc-grad-${monochrome ? "mono" : "gold"}`;
+  const instanceId = useId().replace(/:/g, "");
+  const gradientId = `arc-grad-${monochrome ? "mono" : "gold"}-${instanceId}`;
   return (
     <svg
       width={size}
@@ -19,7 +21,7 @@ export function AeviaArc({ size = 24, className, pulse = false, monochrome = fal
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"
-      className={cn(pulse && "arc-pulse", className)}
+      className={cn("shrink-0", pulse && "arc-pulse", className)}
     >
       <defs>
         <linearGradient id={gradientId} x1="8" y1="52" x2="56" y2="12" gradientUnits="userSpaceOnUse">

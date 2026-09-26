@@ -81,9 +81,9 @@ function TimelineRow({ event }: { event: CalendarEvent }) {
 
 function TimelineFallback() {
   return (
-    <div className="card p-8 text-center">
+    <div className="card min-w-0 px-4 py-8 text-center sm:p-8">
       <div className="meta">Nothing scheduled for today.</div>
-      <p className="mt-2 text-fg text-[15px]">Everything gets done. It&apos;s a matter of when.</p>
+      <p className="mt-2 break-words text-fg text-[15px]">Everything gets done. It&apos;s a matter of when.</p>
     </div>
   );
 }

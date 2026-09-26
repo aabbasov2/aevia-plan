@@ -52,6 +52,7 @@ const ICONS = {
 export default function InboxPage() {
   const [items, setItems] = useState(INITIAL);
   const createTask = useStore((s) => s.createTask);
+  const planWeek = useStore((s) => s.planWeek);
 
   function turnIntoTask(item: InboxItem) {
     createTask({
@@ -63,6 +64,7 @@ export default function InboxPage() {
       colorIndex: 4,
       notes: item.snippet,
     });
+    planWeek();
     setItems((prev) => prev.filter((i) => i.id !== item.id));
   }
 

@@ -36,6 +36,7 @@ export type CalendarEvent = {
   kind: "meeting" | "focus" | "personal" | "task";
   project?: ProjectKey;
   colorIndex?: number;
+  locked?: boolean;
 };
 
 export type PlanHealth =

@@ -13,6 +13,10 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Aevia — Plan",
   description: "Everything gets done. It's a matter of when.",
+  icons: {
+    icon: [{ url: "/favicon.png", type: "image/png", sizes: "256x256" }],
+    shortcut: "/favicon.png",
+  },
 };
 
 export default function RootLayout({

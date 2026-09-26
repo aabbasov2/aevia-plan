@@ -34,19 +34,16 @@ export function TaskCard({ task }: { task: Task }) {
   return (
     <div
       ref={setNodeRef}
+      {...attributes}
+      {...listeners}
       className={cn(
-        "group card flex items-center gap-3 p-4 transition-all",
+        "group card flex min-w-0 touch-none items-center gap-3 p-3 transition-all sm:p-4",
         isDragging ? "opacity-40" : "hover:border-[var(--border-strong)]"
       )}
     >
-      <button
-        {...attributes}
-        {...listeners}
-        className="cursor-grab touch-none text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100 active:cursor-grabbing"
-        aria-label="Drag task"
-      >
+      <div className="cursor-grab text-fg-subtle transition-opacity group-hover:opacity-100 active:cursor-grabbing" aria-label="Drag task">
         <GripVertical size={14} />
-      </button>
+      </div>
 
       <div
         className="h-8 w-1 rounded-full"
@@ -70,7 +67,7 @@ export function TaskCard({ task }: { task: Task }) {
             </span>
           )}
         </div>
-        <div className="mt-1 flex items-center gap-3 meta">
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 meta">
           <span>{humanDuration(task.durationMinutes)}</span>
           <span aria-hidden="true">·</span>
           <span>{humanDeadline(task.deadline)}</span>
@@ -87,7 +84,7 @@ export function TaskCard({ task }: { task: Task }) {
 
       <button
         onClick={() => toggle(task.id)}
-        className="btn btn-ghost h-7 rounded-full px-3 text-[11px]"
+        className="btn btn-ghost h-7 shrink-0 rounded-full px-2 text-[11px] sm:px-3"
       >
         {task.completed ? "Reopen" : "Done"}
       </button>

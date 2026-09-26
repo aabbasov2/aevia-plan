@@ -16,7 +16,7 @@ import { blockColor } from "@/lib/projects";
 import { humanDuration } from "@/lib/time";
 
 /**
- * Drop targets encode "day-<dayIndex>-<startMinutes>" as their id.
+ * Drop targets encode "slot-<dayIndex>-<startMinutes>-<weekStartMs>" as their id.
  * Draggables encode "task-<taskId>" or "event-<eventId>".
  */
 export function DndProvider({ children }: { children: ReactNode }) {
@@ -62,12 +62,13 @@ export function DndProvider({ children }: { children: ReactNode }) {
     // slot-<day>-<startMinutes>
     const day = Number(parts[1]);
     const startMin = Number(parts[2]);
+    const weekStartMs = Number(parts[3]);
     if (activeId.startsWith("task-")) {
       const taskId = activeId.slice("task-".length);
-      scheduleTask(taskId, day, startMin);
+      scheduleTask(taskId, day, startMin, weekStartMs);
     } else if (activeId.startsWith("event-")) {
       const eventId = activeId.slice("event-".length);
-      moveEvent(eventId, day, startMin);
+      moveEvent(eventId, day, startMin, weekStartMs);
     }
   }
 
