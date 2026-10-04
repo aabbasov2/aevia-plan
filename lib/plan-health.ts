@@ -1,30 +1,35 @@
-import { addDays, differenceInMinutes } from "date-fns";
-import type { CalendarEvent, PlanHealth, Task } from "./types";
-import { weekStart } from "./time";
-
-const WORKING_HOURS_PER_DAY = 8;
+import { addDays, addMinutes, differenceInMinutes, startOfDay } from "date-fns";
+import type { CalendarEvent, PlannerPreferences, PlanHealth, Task } from "./types";
+import { DEFAULT_PLANNER_PREFERENCES } from "./preferences";
+import { planningWeekStart } from "./planner";
 
 export function derivePlanHealth(
   tasks: Task[],
   events: CalendarEvent[],
+  preferences: PlannerPreferences = DEFAULT_PLANNER_PREFERENCES,
   now = new Date()
 ): PlanHealth {
-  const ws = weekStart(now);
-  const weekEnd = addDays(ws, 5); // through Fri end (Mon-Fri window)
-  weekEnd.setHours(18, 0, 0, 0);
+  const ws = planningWeekStart(now);
+  const weekEnd = addDays(ws, 4);
+  weekEnd.setHours(0, preferences.workEndMinutes, 0, 0);
+  const planningStart = new Date(
+    Math.max(
+      now.getTime(),
+      addMinutes(startOfDay(ws), preferences.workStartMinutes).getTime()
+    )
+  );
 
-  // Active tasks that need scheduling this week (deadline within this window and not completed)
+  // Include overdue work and tasks without a deadline. Both are eligible for
+  // the same replanning pass as tasks due during this planning week.
   const activeTasks = tasks.filter(
     (t) =>
       !t.completed &&
-      t.deadline &&
-      new Date(t.deadline) >= now &&
-      new Date(t.deadline) <= weekEnd
+      (!t.deadline || new Date(t.deadline) <= weekEnd)
   );
 
   const scheduledMinutesByTask = new Map<string, number>();
   for (const e of events) {
-    if (e.taskId) {
+    if (!e.cancelled && e.taskId && new Date(e.start) >= planningStart && new Date(e.start) < weekEnd) {
       scheduledMinutesByTask.set(
         e.taskId,
         (scheduledMinutesByTask.get(e.taskId) ?? 0) + e.durationMinutes
@@ -38,26 +43,28 @@ export function derivePlanHealth(
     remainingMinutes += Math.max(0, t.durationMinutes - done);
   }
 
-  // Total available minutes = working hours per day between now and Fri end, minus non-task events (meetings/personal).
-  const workingWindowMinutes = Math.max(
-    0,
-    differenceInMinutes(weekEnd, now)
-  );
-  // Rough estimate: cap available to (business days remaining * 8h)
-  const daysRemaining = Math.max(1, Math.ceil(differenceInMinutes(weekEnd, now) / (24 * 60)));
-  const capacityMinutes = daysRemaining * WORKING_HOURS_PER_DAY * 60;
+  let capacityMinutes = 0;
+  for (let dayIndex = 0; dayIndex < 5; dayIndex += 1) {
+    const day = addDays(ws, dayIndex);
+    const workStart = addMinutes(startOfDay(day), preferences.workStartMinutes);
+    const workEnd = addMinutes(startOfDay(day), preferences.workEndMinutes);
+    const availableStart = new Date(Math.max(planningStart.getTime(), workStart.getTime()));
+    if (availableStart < workEnd) {
+      capacityMinutes += differenceInMinutes(workEnd, availableStart);
+    }
+  }
 
   const busyMinutes = events
-    .filter((e) => e.kind !== "task" && new Date(e.start) >= now && new Date(e.start) < weekEnd)
+    .filter((e) => !e.cancelled && e.kind !== "task" && new Date(e.start) >= planningStart && new Date(e.start) < weekEnd)
     .reduce((sum, e) => sum + e.durationMinutes, 0);
 
   const alreadyScheduledTaskMinutes = events
-    .filter((e) => e.kind === "task" && new Date(e.start) >= now && new Date(e.start) < weekEnd)
+    .filter((e) => !e.cancelled && e.kind === "task" && new Date(e.start) >= planningStart && new Date(e.start) < weekEnd)
     .reduce((sum, e) => sum + e.durationMinutes, 0);
 
   const availableMinutes = Math.max(
     0,
-    Math.min(workingWindowMinutes, capacityMinutes) - busyMinutes - alreadyScheduledTaskMinutes
+    capacityMinutes - busyMinutes - alreadyScheduledTaskMinutes
   );
 
   const remainingHours = round1(remainingMinutes / 60);
@@ -93,15 +100,22 @@ function round1(n: number) {
 export function deriveMetrics(
   tasks: Task[],
   events: CalendarEvent[],
+  preferences: PlannerPreferences = DEFAULT_PLANNER_PREFERENCES,
   now = new Date()
 ) {
-  const health = derivePlanHealth(tasks, events, now);
-  const ws = weekStart(now);
-  const weekEnd = addDays(ws, 5);
-  weekEnd.setHours(18, 0, 0, 0);
+  const health = derivePlanHealth(tasks, events, preferences, now);
+  const ws = planningWeekStart(now);
+  const weekEnd = addDays(ws, 4);
+  weekEnd.setHours(0, preferences.workEndMinutes, 0, 0);
+  const planningStart = new Date(
+    Math.max(
+      now.getTime(),
+      addMinutes(startOfDay(ws), preferences.workStartMinutes).getTime()
+    )
+  );
 
   const scheduledMinutes = events
-    .filter((e) => new Date(e.start) >= now && new Date(e.start) < weekEnd)
+    .filter((e) => !e.cancelled && new Date(e.start) >= planningStart && new Date(e.start) < weekEnd)
     .reduce((s, e) => s + e.durationMinutes, 0);
 
   const remainingHours =

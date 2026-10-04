@@ -1,13 +1,9 @@
 import { addDays, addMinutes, isBefore, startOfDay } from "date-fns";
-import type { CalendarEvent, Task } from "./types";
+import type { CalendarEvent, PlannerPreferences, Task } from "./types";
 import { weekStart } from "./time";
+import { DEFAULT_PLANNER_PREFERENCES } from "./preferences";
 
-const WORK_START = 9 * 60;
-const WORK_END = 18 * 60;
-const LUNCH_START = 13 * 60;
-const LUNCH_END = 14 * 60;
 const SLOT = 10;
-const BREAK_MINUTES = 10;
 const MAX_FOCUS_BLOCK_MINUTES = 60;
 
 export type PlanRun = {
@@ -22,34 +18,36 @@ type PlannedBlock = {
   durationMinutes: number;
 };
 
-function planningWeekStart(now: Date) {
+export function planningWeekStart(now: Date) {
   const currentWeek = weekStart(now);
   return now.getDay() === 0 || now.getDay() === 6
     ? addDays(currentWeek, 7)
     : currentWeek;
 }
 
-export function buildPlan(tasks: Task[], events: CalendarEvent[], now = new Date()) {
-  const ws = planningWeekStart(now);
+export function buildPlan(
+  tasks: Task[],
+  events: CalendarEvent[],
+  preferences: PlannerPreferences = DEFAULT_PLANNER_PREFERENCES,
+  now = new Date(),
+  targetWeek = planningWeekStart(now)
+) {
+  const ws = weekStart(targetWeek);
   const isCurrentWeek = ws.getTime() === weekStart(now).getTime();
-  const occupied = events.map((event) => ({
-    start: new Date(event.start),
-    end: addMinutes(new Date(event.start), event.durationMinutes),
+  const occupied = events.filter((event) => !event.cancelled).map((event) => ({
+    start: addMinutes(new Date(event.start), -preferences.bufferMinutes),
+    end: addMinutes(
+      new Date(event.start),
+      event.durationMinutes + preferences.bufferMinutes
+    ),
   }));
-  for (let day = 0; day < 5; day += 1) {
-    const lunchStart = addMinutes(startOfDay(addDays(ws, day)), LUNCH_START);
-    occupied.push({
-      start: lunchStart,
-      end: addMinutes(lunchStart, LUNCH_END - LUNCH_START),
-    });
-  }
   const blocks: PlannedBlock[] = [];
   const unscheduled: string[] = [];
   let nextTaskAllowedAt: Date | null = null;
 
   const scheduledByTask = new Map<string, number>();
   for (const event of events) {
-    if (event.taskId) {
+    if (!event.cancelled && event.taskId && new Date(event.start) >= now) {
       scheduledByTask.set(
         event.taskId,
         (scheduledByTask.get(event.taskId) ?? 0) + event.durationMinutes
@@ -69,22 +67,45 @@ export function buildPlan(tasks: Task[], events: CalendarEvent[], now = new Date
     let remaining = Math.max(0, task.durationMinutes - (scheduledByTask.get(task.id) ?? 0));
     if (remaining === 0) continue;
 
+    const fallbackDeadline = addMinutes(
+      startOfDay(addDays(ws, 4)),
+      preferences.workEndMinutes
+    );
+    const firstPlanningSlot = addMinutes(
+      startOfDay(ws),
+      preferences.workStartMinutes
+    );
+    const earliestPlanningTime = isCurrentWeek && now > firstPlanningSlot
+      ? now
+      : firstPlanningSlot;
+    const statedDeadline = task.deadline ? new Date(task.deadline) : null;
+    // An overdue deadline remains visible on the task, but it must not make
+    // the task permanently impossible to place. Replan overdue work into the
+    // earliest available future space instead.
+    const schedulingDeadline =
+      statedDeadline && statedDeadline > earliestPlanningTime
+        ? statedDeadline
+        : fallbackDeadline;
+
     let currentBlock: PlannedBlock | null = null;
     for (let day = 0; day < 5 && remaining > 0; day += 1) {
-      for (let minutes = WORK_START; minutes < WORK_END && remaining > 0; minutes += SLOT) {
+      for (
+        let minutes = preferences.workStartMinutes;
+        minutes < preferences.workEndMinutes && remaining > 0;
+        minutes += SLOT
+      ) {
         const slotStart = addMinutes(startOfDay(addDays(ws, day)), minutes);
         const slotEnd = addMinutes(slotStart, SLOT);
-        const deadline = task.deadline ? new Date(task.deadline) : addMinutes(startOfDay(addDays(ws, 4)), WORK_END);
 
         if (currentBlock && currentBlock.durationMinutes >= MAX_FOCUS_BLOCK_MINUTES) {
           currentBlock = flushBlock(currentBlock, blocks);
-          nextTaskAllowedAt = addMinutes(slotStart, BREAK_MINUTES);
+          nextTaskAllowedAt = addMinutes(slotStart, preferences.bufferMinutes);
         }
 
         if (
           (isCurrentWeek && isBefore(slotEnd, now)) ||
           (nextTaskAllowedAt && isBefore(slotStart, nextTaskAllowedAt)) ||
-          isBefore(deadline, slotEnd) ||
+          isBefore(schedulingDeadline, slotEnd) ||
           overlaps(slotStart, slotEnd, occupied)
         ) {
           currentBlock = flushBlock(currentBlock, blocks);
@@ -102,7 +123,14 @@ export function buildPlan(tasks: Task[], events: CalendarEvent[], now = new Date
           currentBlock = { task, start: slotStart.toISOString(), durationMinutes: duration };
         }
 
-        occupied.push({ start: slotStart, end: addMinutes(slotStart, duration) });
+        occupied.push({
+          start: slotStart,
+          // Keep adjacent slots available while a focus block is being built.
+          // The recovery buffer is enforced by nextTaskAllowedAt once the
+          // complete block is flushed; applying it to every 10-minute slot
+          // makes the task collide with itself.
+          end: addMinutes(slotStart, duration),
+        });
         remaining -= duration;
       }
     }
@@ -112,7 +140,7 @@ export function buildPlan(tasks: Task[], events: CalendarEvent[], now = new Date
       const lastBlock = taskBlocks[taskBlocks.length - 1];
       nextTaskAllowedAt = addMinutes(
         new Date(lastBlock.start),
-        lastBlock.durationMinutes + BREAK_MINUTES
+        lastBlock.durationMinutes + preferences.bufferMinutes
       );
     }
     if (remaining > 0) unscheduled.push(task.id);
@@ -134,5 +162,4 @@ export function overlaps(
   return intervals.some((interval) => start < interval.end && end > interval.start);
 }
 
-export { WORK_END, WORK_START };
-export { BREAK_MINUTES, MAX_FOCUS_BLOCK_MINUTES };
+export { MAX_FOCUS_BLOCK_MINUTES };

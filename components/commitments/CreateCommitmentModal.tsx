@@ -119,7 +119,7 @@ export function CreateCommitmentModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6 fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--overlay)] p-6 fade-in"
       onClick={() => onOpenChange(false)}
     >
       <div

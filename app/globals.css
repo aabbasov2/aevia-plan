@@ -15,6 +15,16 @@
   --gold-soft: rgba(216, 178, 106, 0.14);
   --gold-strong: #efd9a8;
   --ring: rgba(216, 178, 106, 0.35);
+  --overlay: rgba(0, 0, 0, 0.55);
+  --calendar-offhours: rgba(0, 0, 0, 0.1);
+  --calendar-weekend: rgba(255, 255, 255, 0.012);
+  --grid-half: rgba(255, 255, 255, 0.025);
+  --event-border: rgba(255, 255, 255, 0.05);
+  --event-border-hover: rgba(255, 255, 255, 0.1);
+  --event-marker-bg: rgba(0, 0, 0, 0.2);
+  --event-user-accent: rgba(237, 230, 214, 0.42);
+  --event-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  --calendar-shadow: 0 18px 60px rgba(0, 0, 0, 0.18);
 
   --block-1: #3a342a;
   --block-2: #2f3a2e;
@@ -44,6 +54,16 @@
   --gold-soft: rgba(183, 145, 63, 0.14);
   --gold-strong: #8f6f2a;
   --ring: rgba(183, 145, 63, 0.35);
+  --overlay: rgba(45, 39, 30, 0.28);
+  --calendar-offhours: rgba(74, 64, 48, 0.045);
+  --calendar-weekend: rgba(183, 145, 63, 0.028);
+  --grid-half: rgba(11, 11, 13, 0.035);
+  --event-border: rgba(11, 11, 13, 0.08);
+  --event-border-hover: rgba(11, 11, 13, 0.16);
+  --event-marker-bg: rgba(255, 255, 255, 0.58);
+  --event-user-accent: rgba(26, 26, 31, 0.34);
+  --event-shadow: 0 4px 14px rgba(76, 60, 32, 0.1);
+  --calendar-shadow: 0 18px 50px rgba(76, 60, 32, 0.09);
 
   --block-1: #ede3cf;
   --block-2: #dfe6d6;
@@ -195,6 +215,19 @@
   .input:focus {
     outline: none;
     border-color: var(--ring);
+  }
+  .calendar-event {
+    border-color: var(--event-border);
+    box-shadow: var(--event-shadow);
+  }
+  .calendar-event:hover {
+    border-color: var(--event-border-hover);
+  }
+  .calendar-week-grid {
+    min-width: 1080px;
+  }
+  [data-sidebar-hidden="true"] .calendar-week-grid {
+    min-width: 100%;
   }
   textarea.input {
     height: auto;

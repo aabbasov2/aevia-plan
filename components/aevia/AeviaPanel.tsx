@@ -5,12 +5,14 @@ import { AeviaArc } from "@/components/brand/AeviaArc";
 import { useStore } from "@/lib/store";
 import { deriveMetrics } from "@/lib/plan-health";
 import { CreateTaskModal } from "@/components/tasks/CreateTaskModal";
+import { formatHm } from "@/lib/time";
 
 export function AeviaPanel({ variant = "rail" }: { variant?: "rail" | "hero" }) {
   const tasks = useStore((s) => s.tasks);
   const events = useStore((s) => s.events);
+  const preferences = useStore((s) => s.plannerPreferences);
   const planWeek = useStore((s) => s.planWeek);
-  const m = deriveMetrics(tasks, events);
+  const m = deriveMetrics(tasks, events, preferences);
   const [pulse, setPulse] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [captureOpen, setCaptureOpen] = useState(false);
@@ -71,7 +73,7 @@ export function AeviaPanel({ variant = "rail" }: { variant?: "rail" | "hero" }) 
         </div>
         {result && <p className="mt-3 text-[12px] text-fg-muted">{result}</p>}
         <p className="mt-3 text-[11px] text-fg-subtle">
-          09:00–18:00 workday · 13:00 lunch · 10m recovery breaks
+          {formatHm(preferences.workStartMinutes)}–{formatHm(preferences.workEndMinutes)} workday · {formatHm(preferences.lunchStartMinutes)} lunch · {preferences.bufferMinutes}m buffer
         </p>
       </div>
       <CreateTaskModal

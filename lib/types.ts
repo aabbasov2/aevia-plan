@@ -33,10 +33,22 @@ export type CalendarEvent = {
   durationMinutes: number;
   /** if this event is a scheduled task, carry its id */
   taskId?: string;
-  kind: "meeting" | "focus" | "personal" | "task";
+  kind: "meeting" | "focus" | "personal" | "task" | "lunch";
+  /** who chose this event's current calendar position */
+  origin?: "user" | "aevia";
   project?: ProjectKey;
   colorIndex?: number;
   locked?: boolean;
+  /** cancelled events remain visible but no longer reserve planning time */
+  cancelled?: boolean;
+};
+
+export type PlannerPreferences = {
+  workStartMinutes: number;
+  workEndMinutes: number;
+  bufferMinutes: number;
+  lunchStartMinutes: number;
+  lunchDurationMinutes: number;
 };
 
 export type PlanHealth =

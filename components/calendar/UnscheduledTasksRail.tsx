@@ -10,7 +10,7 @@ export function UnscheduledTasksRail() {
 
   const scheduledMinutesByTask = new Map<string, number>();
   for (const e of events) {
-    if (e.taskId) {
+    if (!e.cancelled && e.taskId) {
       scheduledMinutesByTask.set(
         e.taskId,
         (scheduledMinutesByTask.get(e.taskId) ?? 0) + e.durationMinutes

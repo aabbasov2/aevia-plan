@@ -57,20 +57,22 @@ function TimelineRow({ event }: { event: CalendarEvent }) {
       </div>
       <div className="py-3 pr-6">
         <div
-          className="flex items-center gap-3 rounded-md border-l-2 px-4 py-3 transition-colors hover:brightness-110"
+          className={`flex items-center gap-3 rounded-md border-l-2 px-4 py-3 transition-colors hover:brightness-110 ${event.cancelled ? "opacity-60 saturate-50" : ""}`}
           style={{
             background: blockColor(event.colorIndex),
             borderLeftColor: event.kind === "task" ? "var(--gold)" : "var(--border-strong)",
           }}
         >
           <div className="flex-1">
-            <div className="text-fg text-[14px]">{event.title}</div>
+            <div className={`text-[14px] text-fg ${event.cancelled ? "line-through decoration-2" : ""}`}>
+              {event.title}
+            </div>
             <div className="mt-0.5 text-fg-muted text-[11px]">
               {formatRange(start, event.durationMinutes)}
               {project ? ` · ${project.label}` : ""}
             </div>
           </div>
-          {event.kind === "meeting" && (
+          {event.kind === "meeting" && !event.cancelled && (
             <button className="btn h-7 rounded-full px-3 text-[11px]">Join</button>
           )}
         </div>

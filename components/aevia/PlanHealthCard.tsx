@@ -7,7 +7,8 @@ import { Check, AlertTriangle, Clock } from "lucide-react";
 export function PlanHealthCard() {
   const tasks = useStore((s) => s.tasks);
   const events = useStore((s) => s.events);
-  const health = derivePlanHealth(tasks, events);
+  const preferences = useStore((s) => s.plannerPreferences);
+  const health = derivePlanHealth(tasks, events, preferences);
 
   return (
     <div className="card p-5">

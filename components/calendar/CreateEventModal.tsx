@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { projectList } from "@/lib/projects";
 import type { CalendarEvent, ProjectKey } from "@/lib/types";
+import { weekStart } from "@/lib/time";
 
 const DURATIONS = [
   { label: "30m", value: 30 },
@@ -21,9 +22,11 @@ const EVENT_TYPES: Array<{ label: string; value: CalendarEvent["kind"] }> = [
 
 export function CreateEventModal({
   open,
+  initialStart,
   onOpenChange,
 }: {
   open: boolean;
+  initialStart?: Date | null;
   onOpenChange: (open: boolean) => void;
 }) {
   const createEvent = useStore((s) => s.createEvent);
@@ -35,6 +38,15 @@ export function CreateEventModal({
   const [kind, setKind] = useState<CalendarEvent["kind"]>("meeting");
   const [project, setProject] = useState<ProjectKey>("work");
   const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setTitle("");
+    setStart(toLocalInputValue(initialStart ?? new Date()));
+    setEnd("");
+    setDuration(60);
+    setMessage(null);
+  }, [initialStart, open]);
 
   if (!open) return null;
 
@@ -49,6 +61,7 @@ export function CreateEventModal({
       start: startDate.toISOString(),
       durationMinutes,
       kind,
+      origin: "user",
       project,
       colorIndex: colorForProject(project),
     });
@@ -56,14 +69,14 @@ export function CreateEventModal({
       setMessage(result.message ?? "That time is unavailable.");
       return;
     }
-    if (result.movedTask) planWeek();
+    if (result.movedTask) planWeek(weekStart(startDate).getTime());
     setTitle("");
     setMessage(null);
     onOpenChange(false);
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 fade-in sm:p-6" onClick={() => onOpenChange(false)}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--overlay)] p-4 fade-in sm:p-6" onClick={() => onOpenChange(false)}>
       <div className="card-raised max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto p-5 fade-in sm:p-6" onClick={(event) => event.stopPropagation()}>
         <div className="mb-5 flex items-center justify-between">
           <h2 className="h2 text-fg">New calendar event</h2>

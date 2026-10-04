@@ -11,7 +11,8 @@ import { PlanHealthCard } from "@/components/aevia/PlanHealthCard";
 export default function TodayPage() {
   const tasks = useStore((s) => s.tasks);
   const events = useStore((s) => s.events);
-  const m = deriveMetrics(tasks, events);
+  const preferences = useStore((s) => s.plannerPreferences);
+  const m = deriveMetrics(tasks, events, preferences);
 
   return (
     <div className="mx-auto max-w-[1240px] px-4 py-8 sm:px-6 sm:py-10 lg:px-10 lg:py-14">
