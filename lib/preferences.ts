@@ -6,4 +6,5 @@ export const DEFAULT_PLANNER_PREFERENCES: PlannerPreferences = {
   bufferMinutes: 10,
   lunchStartMinutes: 13 * 60,
   lunchDurationMinutes: 60,
+  timezone: "UTC",
 };

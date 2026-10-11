@@ -1,0 +1,4 @@
+project_id = "aevia-alpha"
+
+[auth]
+enable_signup = false

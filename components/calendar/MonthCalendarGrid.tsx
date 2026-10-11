@@ -13,6 +13,7 @@ import {
 import { blockColor } from "@/lib/projects";
 import { useStore } from "@/lib/store";
 import { formatHm } from "@/lib/time";
+import { CalendarEventIdentity } from "@/components/calendar/CalendarEventIdentity";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -85,6 +86,7 @@ export function MonthCalendarGrid({
                   return (
                     <button
                       key={event.id}
+                      data-calendar-event-id={event.id}
                       className={`block w-full overflow-hidden rounded-[4px] border border-[var(--event-border)] px-1.5 py-1 text-left text-[9px] leading-[11px] text-fg shadow-[var(--event-shadow)] transition hover:border-[var(--event-border-hover)] ${
                         selectedEventIds.has(event.id)
                           ? "outline outline-2 outline-offset-1 outline-[var(--gold)]"
@@ -105,11 +107,14 @@ export function MonthCalendarGrid({
                       aria-selected={selectedEventIds.has(event.id)}
                       title={`${event.cancelled ? "Cancelled · " : ""}${formatHm(startMinutes)} · ${event.title} · Double-click to edit`}
                     >
-                      <span className="mr-1 font-semibold" style={{ fontVariantNumeric: "tabular-nums" }}>
-                        {formatHm(startMinutes)}
-                      </span>
-                      <span className={`break-words ${event.cancelled ? "line-through decoration-2" : ""}`}>
-                        {event.title}
+                      <span className="flex min-w-0 items-center gap-1">
+                        <CalendarEventIdentity event={event} size="tiny" />
+                        <span className="shrink-0 font-semibold" style={{ fontVariantNumeric: "tabular-nums" }}>
+                          {formatHm(startMinutes)}
+                        </span>
+                        <span className={`min-w-0 break-words ${event.cancelled ? "line-through decoration-2" : ""}`}>
+                          {event.title}
+                        </span>
                       </span>
                     </button>
                   );

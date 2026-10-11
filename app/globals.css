@@ -223,6 +223,65 @@
   .calendar-event:hover {
     border-color: var(--event-border-hover);
   }
+  .today-page {
+    background:
+      radial-gradient(ellipse at 76% 1%, rgba(134, 79, 62, 0.2), transparent 28rem),
+      radial-gradient(ellipse at 28% 0%, rgba(71, 79, 94, 0.14), transparent 30rem),
+      var(--bg);
+  }
+  .today-scene-overlay {
+    background: linear-gradient(180deg, rgba(7, 9, 13, 0.34) 0%, rgba(7, 9, 13, 0.54) 44%, rgba(7, 9, 13, 0.76) 100%);
+  }
+  .light .today-scene-photo {
+    opacity: 0.16;
+  }
+  .light .today-scene-overlay {
+    background: linear-gradient(180deg, rgba(247, 244, 238, 0.38) 0%, rgba(247, 244, 238, 0.62) 44%, rgba(247, 244, 238, 0.86) 100%);
+  }
+  .today-card {
+    background: color-mix(in srgb, var(--surface) 58%, transparent);
+    border: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);
+    box-shadow: 0 18px 46px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(24px) saturate(150%);
+    -webkit-backdrop-filter: blur(24px) saturate(150%);
+  }
+  .today-metric-card {
+    background: color-mix(in srgb, var(--surface) 48%, transparent);
+    border: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.09);
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
+  }
+  .today-icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    color: var(--fg-muted);
+    transition: color 140ms ease, background 140ms ease;
+  }
+  .today-icon-button:hover {
+    color: var(--fg);
+    background: var(--surface-2);
+  }
+  .today-view-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    color: var(--fg-muted);
+    font-size: 11px;
+    transition: color 140ms ease;
+  }
+  .today-view-link:hover {
+    color: var(--gold-strong);
+  }
+  .today-event {
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
   .calendar-week-grid {
     min-width: 1080px;
   }

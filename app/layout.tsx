@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 import { AppShell } from "@/components/shell/AppShell";
+import { CloudSyncProvider } from "@/components/shell/CloudSyncProvider";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -26,7 +27,9 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning className={inter.variable}>
       <body className="font-sans">
         <Providers>
-          <AppShell>{children}</AppShell>
+          <CloudSyncProvider>
+            <AppShell>{children}</AppShell>
+          </CloudSyncProvider>
         </Providers>
       </body>
     </html>

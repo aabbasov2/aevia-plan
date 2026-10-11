@@ -10,7 +10,7 @@ import { CalendarPreferencesModal } from "./CalendarPreferencesModal";
 import { useStore } from "@/lib/store";
 import { weekStart } from "@/lib/time";
 import { planningWeekStart } from "@/lib/planner";
-import type { CalendarView } from "@/lib/calendar-layout";
+import { CALENDAR_DROP_SLOT_MINUTES, type CalendarView } from "@/lib/calendar-layout";
 import type { CalendarEvent } from "@/lib/types";
 import { EventEditorModal } from "./EventEditorModal";
 
@@ -31,6 +31,7 @@ export function WeeklyCalendar() {
   const ensureLunchEvents = useStore((state) => state.ensureLunchEvents);
   const planWeek = useStore((state) => state.planWeek);
   const addEvents = useStore((state) => state.addEvents);
+  const updateEvent = useStore((state) => state.updateEvent);
   const deleteEvents = useStore((state) => state.deleteEvents);
   const setEventsCancelled = useStore((state) => state.setEventsCancelled);
   const visibleWeek = useMemo(() => weekStart(anchorDate), [anchorDate]);
@@ -142,6 +143,11 @@ export function WeeklyCalendar() {
         return;
       }
 
+      const focusedEventId =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement.closest<HTMLElement>("[data-calendar-event-id]")?.dataset
+              .calendarEventId
+          : undefined;
       const modifier = keyboardEvent.ctrlKey || keyboardEvent.metaKey;
       const key = keyboardEvent.key.toLowerCase();
       if (modifier && key === "c" && selectedEventIds.length > 0) {
@@ -156,10 +162,44 @@ export function WeeklyCalendar() {
       } else if (
         selectedEventIds.length > 0 &&
         (keyboardEvent.key === "Delete" ||
-          (keyboardEvent.metaKey && keyboardEvent.key === "Backspace"))
+          (keyboardEvent.metaKey && keyboardEvent.key === "Backspace") ||
+          (selectedEventIds.length === 1 &&
+            focusedEventId === selectedEventIds[0] &&
+            keyboardEvent.key === "Backspace"))
       ) {
         keyboardEvent.preventDefault();
         deleteSelected();
+      } else if (
+        selectedEventIds.length === 1 &&
+        focusedEventId === selectedEventIds[0] &&
+        !keyboardEvent.ctrlKey &&
+        !keyboardEvent.metaKey &&
+        !keyboardEvent.altKey &&
+        ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(keyboardEvent.key)
+      ) {
+        const selectedEvent = events.find((event) => event.id === selectedEventIds[0]);
+        if (!selectedEvent) return;
+
+        keyboardEvent.preventDefault();
+        const nextStart = new Date(selectedEvent.start);
+        if (keyboardEvent.key === "ArrowUp") {
+          nextStart.setMinutes(nextStart.getMinutes() - CALENDAR_DROP_SLOT_MINUTES);
+        } else if (keyboardEvent.key === "ArrowDown") {
+          nextStart.setMinutes(nextStart.getMinutes() + CALENDAR_DROP_SLOT_MINUTES);
+        } else if (keyboardEvent.key === "ArrowLeft") {
+          nextStart.setDate(nextStart.getDate() - 1);
+        } else {
+          nextStart.setDate(nextStart.getDate() + 1);
+        }
+
+        updateEvent(selectedEvent.id, {
+          title: selectedEvent.title,
+          start: nextStart.toISOString(),
+          durationMinutes: selectedEvent.durationMinutes,
+          kind: selectedEvent.kind,
+          project: selectedEvent.project,
+          colorIndex: selectedEvent.colorIndex,
+        });
       }
     };
 
@@ -170,10 +210,12 @@ export function WeeklyCalendar() {
     copySelected,
     deleteSelected,
     eventOpen,
+    events,
     pasteCopied,
     preferencesOpen,
     selectedEventId,
-    selectedEventIds.length,
+    selectedEventIds,
+    updateEvent,
   ]);
 
   function selectEvent(eventId: string, additive: boolean) {
@@ -206,7 +248,7 @@ export function WeeklyCalendar() {
             <span>Lunch is movable</span>
           </div>
           <span className="hidden sm:inline">
-            Click selects · Ctrl/⌘-click selects multiple · Double-click edits
+            Click selects · ←/→ moves a day · ↑/↓ moves 15 min · Backspace deletes · Double-click edits
           </span>
           <div className="ml-auto flex items-center gap-3" aria-label="Calendar event legend">
             <span className="flex items-center gap-1.5">

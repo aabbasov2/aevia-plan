@@ -13,9 +13,11 @@ import {
 } from "@dnd-kit/core";
 import { useState, type ReactNode } from "react";
 import { useStore } from "@/lib/store";
+import type { ConflictReplanProposal } from "@/lib/store";
 import { blockColor } from "@/lib/projects";
 import { humanDuration } from "@/lib/time";
 import { calendarEventHeight } from "@/lib/calendar-layout";
+import { ConflictReplanPanel } from "@/components/calendar/ConflictReplanPanel";
 
 type ActiveDragKind = "task" | "event" | null;
 
@@ -50,11 +52,14 @@ export function DndProvider({ children }: { children: ReactNode }) {
   const [activeColor, setActiveColor] = useState<string>("var(--block-3)");
   const [activeDuration, setActiveDuration] = useState<number>(60);
   const [activeKind, setActiveKind] = useState<ActiveDragKind>(null);
+  const [conflictProposal, setConflictProposal] = useState<ConflictReplanProposal | null>(null);
 
   const scheduleTask = useStore((s) => s.scheduleTask);
   const moveEvent = useStore((s) => s.moveEvent);
   const tasks = useStore((s) => s.tasks);
   const events = useStore((s) => s.events);
+  const previewConflictReplan = useStore((s) => s.previewConflictReplan);
+  const applyConflictReplan = useStore((s) => s.applyConflictReplan);
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
@@ -95,10 +100,14 @@ export function DndProvider({ children }: { children: ReactNode }) {
     const weekStartMs = Number(parts[3]);
     if (activeId.startsWith("task-")) {
       const taskId = activeId.slice("task-".length);
-      scheduleTask(taskId, day, startMin, weekStartMs);
+      const eventId = scheduleTask(taskId, day, startMin, weekStartMs);
+      const proposal = eventId ? previewConflictReplan(eventId) : null;
+      if (proposal) setConflictProposal(proposal);
     } else if (activeId.startsWith("event-")) {
       const eventId = activeId.slice("event-".length);
       moveEvent(eventId, day, startMin, weekStartMs);
+      const proposal = previewConflictReplan(eventId);
+      if (proposal) setConflictProposal(proposal);
     }
   }
 
@@ -125,6 +134,20 @@ export function DndProvider({ children }: { children: ReactNode }) {
       onDragCancel={onDragCancel}
     >
       {children}
+      {conflictProposal && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[var(--overlay)] p-4" onClick={() => setConflictProposal(null)}>
+          <div className="card-raised w-full max-w-lg p-5 sm:p-6" onClick={(event) => event.stopPropagation()}>
+            <ConflictReplanPanel
+              proposal={conflictProposal}
+              onDismiss={() => setConflictProposal(null)}
+              onApply={() => {
+                applyConflictReplan(conflictProposal);
+                setConflictProposal(null);
+              }}
+            />
+          </div>
+        </div>
+      )}
       <DragOverlay dropAnimation={null}>
         {activeLabel ? (
           <div

@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
-import { useStore } from "@/lib/store";
+import { useStore, type ConflictReplanProposal } from "@/lib/store";
 import { projectList } from "@/lib/projects";
 import type { CalendarEvent, ProjectKey } from "@/lib/types";
-import { weekStart } from "@/lib/time";
+import { ConflictReplanPanel } from "./ConflictReplanPanel";
 
 const DURATIONS = [
   { label: "30m", value: 30 },
@@ -23,14 +23,21 @@ const EVENT_TYPES: Array<{ label: string; value: CalendarEvent["kind"] }> = [
 export function CreateEventModal({
   open,
   initialStart,
+  initialTitle,
+  initialDurationMinutes,
+  initialKind,
   onOpenChange,
 }: {
   open: boolean;
   initialStart?: Date | null;
+  initialTitle?: string;
+  initialDurationMinutes?: number;
+  initialKind?: CalendarEvent["kind"];
   onOpenChange: (open: boolean) => void;
 }) {
   const createEvent = useStore((s) => s.createEvent);
-  const planWeek = useStore((s) => s.planWeek);
+  const previewConflictReplan = useStore((s) => s.previewConflictReplan);
+  const applyConflictReplan = useStore((s) => s.applyConflictReplan);
   const [title, setTitle] = useState("");
   const [start, setStart] = useState(toLocalInputValue(new Date()));
   const [end, setEnd] = useState("");
@@ -38,15 +45,18 @@ export function CreateEventModal({
   const [kind, setKind] = useState<CalendarEvent["kind"]>("meeting");
   const [project, setProject] = useState<ProjectKey>("work");
   const [message, setMessage] = useState<string | null>(null);
+  const [conflictProposal, setConflictProposal] = useState<ConflictReplanProposal | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    setTitle("");
+    setTitle(initialTitle ?? "");
     setStart(toLocalInputValue(initialStart ?? new Date()));
     setEnd("");
-    setDuration(60);
+    setDuration(initialDurationMinutes ?? 60);
+    setKind(initialKind === "meeting" || initialKind === "personal" || initialKind === "focus" ? initialKind : "meeting");
     setMessage(null);
-  }, [initialStart, open]);
+    setConflictProposal(null);
+  }, [initialDurationMinutes, initialKind, initialStart, initialTitle, open]);
 
   if (!open) return null;
 
@@ -69,7 +79,11 @@ export function CreateEventModal({
       setMessage(result.message ?? "That time is unavailable.");
       return;
     }
-    if (result.movedTask) planWeek(weekStart(startDate).getTime());
+    const proposal = result.eventId ? previewConflictReplan(result.eventId) : null;
+    if (proposal?.overlaps.length) {
+      setConflictProposal(proposal);
+      return;
+    }
     setTitle("");
     setMessage(null);
     onOpenChange(false);
@@ -85,6 +99,17 @@ export function CreateEventModal({
           </button>
         </div>
 
+        {conflictProposal ? (
+          <ConflictReplanPanel
+            proposal={conflictProposal}
+            onDismiss={() => onOpenChange(false)}
+            onApply={() => {
+              applyConflictReplan(conflictProposal);
+              setConflictProposal(null);
+              onOpenChange(false);
+            }}
+          />
+        ) : (
         <div className="space-y-4">
           <Field label="Event">
             <input className="input" placeholder="What is happening?" value={title} onChange={(event) => setTitle(event.target.value)} autoFocus />
@@ -124,11 +149,16 @@ export function CreateEventModal({
             </Field>
           </div>
         </div>
+        )}
 
-        <div className="mt-6 flex justify-end gap-2">
-          <button className="btn" onClick={() => onOpenChange(false)}>Cancel</button>
-          <button className="btn btn-gold" onClick={submit}>Add event</button>
-        </div>
+        {!conflictProposal && (
+          <div className="mt-6 flex justify-end gap-2">
+            <>
+              <button className="btn" onClick={() => onOpenChange(false)}>Cancel</button>
+              <button className="btn btn-gold" onClick={submit}>Add event</button>
+            </>
+          </div>
+        )}
         {message && <p className="mt-3 text-[12px] text-[#d39a76]">{message}</p>}
       </div>
     </div>

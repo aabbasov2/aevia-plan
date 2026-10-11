@@ -16,10 +16,14 @@ export type Task = {
   id: string;
   title: string;
   durationMinutes: number;
+  /** Preferred maximum length of each Aevia-planned focus session. */
+  focusBlockMinutes?: number;
   deadline?: string; // ISO date
   recurrence: Recurrence;
   project: ProjectKey;
   notes?: string;
+  /** Idempotency link when a captured thought is converted into this task. */
+  sourceDistractionId?: string;
   completed?: boolean;
   colorIndex?: number; // 1..6
 };
@@ -49,6 +53,7 @@ export type PlannerPreferences = {
   bufferMinutes: number;
   lunchStartMinutes: number;
   lunchDurationMinutes: number;
+  timezone?: string;
 };
 
 export type PlanHealth =
@@ -85,6 +90,15 @@ export type Commitment = {
   project: ProjectKey;
   notes?: string;
   colorIndex?: number;
+};
+
+export type InboxItem = {
+  id: string;
+  source: "email" | "slack" | "manual";
+  title: string;
+  snippet?: string;
+  status: "unprocessed" | "archived" | "dismissed";
+  receivedAt: string;
 };
 
 export type PlanSuggestion = {

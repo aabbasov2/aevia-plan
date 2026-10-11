@@ -5,7 +5,9 @@ import { AeviaArc } from "@/components/brand/AeviaArc";
 import { useStore } from "@/lib/store";
 import { deriveMetrics } from "@/lib/plan-health";
 import { CreateTaskModal } from "@/components/tasks/CreateTaskModal";
+import { DayRecoveryModal } from "@/components/aevia/DayRecoveryModal";
 import { formatHm } from "@/lib/time";
+import { addMinutes, format } from "date-fns";
 
 export function AeviaPanel({ variant = "rail" }: { variant?: "rail" | "hero" }) {
   const tasks = useStore((s) => s.tasks);
@@ -16,6 +18,7 @@ export function AeviaPanel({ variant = "rail" }: { variant?: "rail" | "hero" }) 
   const [pulse, setPulse] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [captureOpen, setCaptureOpen] = useState(false);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
 
   function onPlan() {
     setPulse(true);
@@ -30,14 +33,33 @@ export function AeviaPanel({ variant = "rail" }: { variant?: "rail" | "hero" }) 
     setTimeout(() => setPulse(false), 1500);
   }
 
-  function onTaskCreated() {
+  function onTaskCreated(taskId: string) {
     setPulse(true);
-    const plan = planWeek();
-    setResult(
-      plan.scheduledMinutes > 0
-        ? `Task added · ${Math.round((plan.scheduledMinutes / 60) * 10) / 10}h placed in your week`
-        : "Task added · Aevia could not find an open slot before the deadline"
-    );
+    const state = useStore.getState();
+    const task = state.tasks.find((item) => item.id === taskId);
+    if (!task) return;
+    const scheduled = state.events
+      .filter((event) => event.taskId === taskId && !event.cancelled)
+      .sort((first, second) => first.start.localeCompare(second.start));
+
+    if (scheduled.length === 0 && !task.deadline) {
+      setResult("Task added · add a deadline for automatic scheduling.");
+    } else if (scheduled.length === 0) {
+      setResult("Task added · no open time was found before the deadline.");
+    } else {
+      const first = scheduled[0];
+      const start = new Date(first.start);
+      const end = addMinutes(start, first.durationMinutes);
+      const scheduledMinutes = scheduled.reduce(
+        (sum, event) => sum + event.durationMinutes,
+        0
+      );
+      const remainingMinutes = Math.max(0, task.durationMinutes - scheduledMinutes);
+      const extraSessions = scheduled.length - 1;
+      setResult(
+        `${remainingMinutes > 0 ? "Task partly scheduled" : "Task scheduled"} · ${format(start, "EEE, MMM d")} ${format(start, "HH:mm")}–${format(end, "HH:mm")}${extraSessions > 0 ? ` · ${extraSessions} more session${extraSessions === 1 ? "" : "s"}` : ""}${remainingMinutes > 0 ? ` · ${remainingMinutes}m still needs a slot` : ""}`
+      );
+    }
     setTimeout(() => setPulse(false), 1500);
   }
 
@@ -67,6 +89,9 @@ export function AeviaPanel({ variant = "rail" }: { variant?: "rail" | "hero" }) 
           <button onClick={() => setCaptureOpen(true)} className="btn btn-gold">
             Tell Aevia
           </button>
+          <button onClick={() => setRecoveryOpen(true)} className="btn">
+            My day changed
+          </button>
           <button onClick={onPlan} className="btn">
             Replan this week
           </button>
@@ -81,6 +106,7 @@ export function AeviaPanel({ variant = "rail" }: { variant?: "rail" | "hero" }) 
         onOpenChange={setCaptureOpen}
         onCreated={onTaskCreated}
       />
+      <DayRecoveryModal open={recoveryOpen} onOpenChange={setRecoveryOpen} />
     </>
   );
 }

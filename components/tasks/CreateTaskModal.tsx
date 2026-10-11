@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { projectList } from "@/lib/projects";
@@ -27,10 +27,12 @@ export function CreateTaskModal({
   open,
   onOpenChange,
   onCreated,
+  initialRequest,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  onCreated?: () => void;
+  onCreated?: (taskId: string) => void;
+  initialRequest?: string;
 }) {
   const createTask = useStore((s) => s.createTask);
   const scheduleTaskAt = useStore((s) => s.scheduleTaskAt);
@@ -41,6 +43,19 @@ export function CreateTaskModal({
   const [project, setProject] = useState<ProjectKey>("work");
   const [recurrence, setRecurrence] = useState<Recurrence["kind"]>("none");
   const [notes, setNotes] = useState("");
+  const [mode, setMode] = useState<"ai" | "manual">("ai");
+  const [request, setRequest] = useState("");
+  const [interpreting, setInterpreting] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiClarification, setAiClarification] = useState<string | null>(null);
+  const [focusBlockMinutes, setFocusBlockMinutes] = useState(60);
+
+  useEffect(() => {
+    if (open && initialRequest) {
+      setMode("ai");
+      setRequest(initialRequest);
+    }
+  }, [initialRequest, open]);
 
   if (!open) return null;
 
@@ -49,16 +64,19 @@ export function CreateTaskModal({
     const taskId = createTask({
       title: title.trim(),
       durationMinutes: duration,
+      focusBlockMinutes,
       deadline: deadline ? new Date(deadline).toISOString() : undefined,
       recurrence: { kind: recurrence } as Recurrence,
       project,
       notes: notes.trim() || undefined,
       colorIndex: colorForProject(project),
+    }, {
+      autoSchedule: !scheduleAt,
     });
     if (scheduleAt) scheduleTaskAt(taskId, new Date(scheduleAt).toISOString());
     reset();
     onOpenChange(false);
-    onCreated?.();
+    onCreated?.(taskId);
   }
 
   function reset() {
@@ -69,6 +87,43 @@ export function CreateTaskModal({
     setRecurrence("none");
     setNotes("");
     setProject("work");
+    setMode("ai");
+    setRequest("");
+    setAiError(null);
+    setAiClarification(null);
+    setFocusBlockMinutes(60);
+  }
+
+  async function interpretRequest() {
+    if (!request.trim() || interpreting) return;
+    setInterpreting(true);
+    setAiError(null);
+    setAiClarification(null);
+    try {
+      const now = new Date();
+      const response = await fetch("/api/ai/interpret-task", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: request,
+          today: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`,
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Aevia couldn't interpret that request.");
+      setTitle(data.title);
+      setDuration(data.durationMinutes);
+      setDeadline(data.deadlineDate ? `${data.deadlineDate}T23:59` : "");
+      setProject(data.project);
+      setFocusBlockMinutes(data.sessionMinutes);
+      setAiClarification(data.needsClarification ? data.clarification : null);
+      if (!data.needsClarification) setMode("manual");
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : "Aevia couldn't interpret that request.");
+    } finally {
+      setInterpreting(false);
+    }
   }
 
   return (
@@ -81,12 +136,35 @@ export function CreateTaskModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-5 flex items-center justify-between">
-          <h2 className="h2 text-fg">New task</h2>
+          <h2 className="h2 text-fg">{mode === "ai" ? "Tell Aevia what needs doing" : "Review your task"}</h2>
           <button className="btn-ghost btn h-8 w-8 p-0" onClick={() => onOpenChange(false)}>
             <X size={14} />
           </button>
         </div>
 
+        <div className="mb-5 flex gap-2">
+          <button className={`chip cursor-pointer ${mode === "ai" ? "border-[var(--gold)] bg-[var(--gold-soft)] text-fg" : "hover:text-fg"}`} onClick={() => setMode("ai")}>Describe it</button>
+          <button className={`chip cursor-pointer ${mode === "manual" ? "border-[var(--gold)] bg-[var(--gold-soft)] text-fg" : "hover:text-fg"}`} onClick={() => setMode("manual")}>Enter details</button>
+        </div>
+
+        {mode === "ai" ? (
+          <div className="space-y-4">
+            <Field label="What do you need to finish?">
+              <textarea
+                className="input"
+                rows={4}
+                maxLength={2000}
+                placeholder="I need to finish document filing by Oct 19. It usually takes around 8 hours."
+                value={request}
+                onChange={(event) => setRequest(event.target.value)}
+                autoFocus
+              />
+            </Field>
+            <p className="text-[12px] leading-5 text-fg-muted">Aevia will extract the deadline and effort, break long work into focus sessions, and find open calendar time for you to review.</p>
+            {aiError && <p role="alert" className="text-[12px] text-[#d39a76]">{aiError}</p>}
+            {aiClarification && <p className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 text-[12px] text-fg-muted">{aiClarification}</p>}
+          </div>
+        ) : (
         <div className="space-y-4">
           <Field label="Task">
             <input
@@ -135,6 +213,9 @@ export function CreateTaskModal({
                 value={deadline}
                 onChange={(e) => setDeadline(e.target.value)}
               />
+            <span className="mt-1 block text-[10px] text-fg-subtle">
+              Aevia will find open calendar time before this deadline.
+            </span>
             </Field>
             <Field label="Project">
               <select
@@ -188,15 +269,28 @@ export function CreateTaskModal({
               onChange={(e) => setNotes(e.target.value)}
             />
           </Field>
+          {mode === "manual" && request && (
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 text-[12px] text-fg-muted">
+              <div className="wordmark mb-1 text-[10px]">Aevia understood</div>
+              {title} · {Math.floor(duration / 60)}h{duration % 60 ? ` ${duration % 60}m` : ""}{deadline ? ` · by ${new Date(deadline).toLocaleDateString()}` : ""} · focus sessions up to {focusBlockMinutes}m
+            </div>
+          )}
         </div>
+        )}
 
         <div className="mt-6 flex items-center justify-end gap-2">
           <button className="btn" onClick={() => onOpenChange(false)}>
             Cancel
           </button>
-          <button className="btn btn-gold" onClick={submit}>
-            Create task
-          </button>
+          {mode === "ai" ? (
+            <button className="btn btn-gold" onClick={interpretRequest} disabled={!request.trim() || interpreting}>
+              {interpreting ? "Understanding…" : aiClarification ? "Try again" : "Understand task"}
+            </button>
+          ) : (
+            <button className="btn btn-gold" onClick={submit}>
+              Schedule task
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Ban, CalendarClock, RotateCcw, Trash2, X } from "lucide-react";
+import { Ban, CalendarClock, Play, RotateCcw, Trash2, X } from "lucide-react";
 import { AeviaArc } from "@/components/brand/AeviaArc";
 import { projectList } from "@/lib/projects";
 import { useStore } from "@/lib/store";
@@ -17,9 +17,11 @@ const EVENT_TYPES: Array<{ label: string; value: CalendarEvent["kind"] }> = [
 export function EventEditorModal({
   eventId,
   onClose,
+  onFocusTask,
 }: {
   eventId: string | null;
   onClose: () => void;
+  onFocusTask?: (taskId: string) => void;
 }) {
   const event = useStore((state) => state.events.find((item) => item.id === eventId));
   const task = useStore((state) => state.tasks.find((item) => item.id === event?.taskId));
@@ -211,6 +213,7 @@ export function EventEditorModal({
             </button>
           </div>
           <div className="ml-auto flex gap-2">
+            {event.taskId && task && !task.completed && <button className="btn h-9" onClick={() => { onFocusTask?.(task.id); onClose(); }}><Play size={13} /> Focus task</button>}
             <button className="btn" onClick={onClose}>Close</button>
             <button className="btn btn-gold" onClick={save}>Save changes</button>
           </div>

@@ -97,13 +97,13 @@ export function buildPlan(
         const slotStart = addMinutes(startOfDay(addDays(ws, day)), minutes);
         const slotEnd = addMinutes(slotStart, SLOT);
 
-        if (currentBlock && currentBlock.durationMinutes >= MAX_FOCUS_BLOCK_MINUTES) {
+        if (currentBlock && currentBlock.durationMinutes >= (task.focusBlockMinutes ?? MAX_FOCUS_BLOCK_MINUTES)) {
           currentBlock = flushBlock(currentBlock, blocks);
           nextTaskAllowedAt = addMinutes(slotStart, preferences.bufferMinutes);
         }
 
         if (
-          (isCurrentWeek && isBefore(slotEnd, now)) ||
+          (isCurrentWeek && isBefore(slotStart, now)) ||
           (nextTaskAllowedAt && isBefore(slotStart, nextTaskAllowedAt)) ||
           isBefore(schedulingDeadline, slotEnd) ||
           overlaps(slotStart, slotEnd, occupied)

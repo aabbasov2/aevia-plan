@@ -17,6 +17,10 @@ import {
 } from "@/lib/calendar-layout";
 import { useStore } from "@/lib/store";
 import { AeviaArc } from "@/components/brand/AeviaArc";
+import {
+  CalendarEventIdentity,
+  calendarEventAccent,
+} from "@/components/calendar/CalendarEventIdentity";
 
 type ResizeEdge = "start" | "end";
 type ResizePreview = { startMinutes: number; durationMinutes: number };
@@ -183,6 +187,7 @@ export function CalendarBlock({
   return (
     <div
       ref={setNodeRef}
+      data-calendar-event-id={event.id}
       {...attributes}
       {...listeners}
       onClick={(mouseEvent: ReactMouseEvent<HTMLDivElement>) => {
@@ -230,7 +235,7 @@ export function CalendarBlock({
         left: `calc(${lane * laneWidth}% + ${laneGap}px)`,
         right: `calc(${(laneCount - lane - 1) * laneWidth}% + ${laneGap}px)`,
         background: blockColor(event.colorIndex),
-        borderLeftColor: isAevia ? "var(--gold)" : "var(--event-user-accent)",
+        borderLeftColor: calendarEventAccent(event),
       }}
     >
       {!usesDenseLayout && (
@@ -248,11 +253,14 @@ export function CalendarBlock({
       )}
       {usesCompactRow ? (
         <div className="flex h-full min-h-0 items-center justify-between gap-1">
-          <div className={cn(
-            "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[8px] font-semibold uppercase leading-[9px] text-fg",
-            event.cancelled && "line-through decoration-2"
-          )}>
-            {displayTitle}
+          <div className="flex min-w-0 items-center gap-1 overflow-hidden">
+            <CalendarEventIdentity event={event} size="tiny" />
+            <div className={cn(
+              "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[8px] font-semibold uppercase leading-[9px] text-fg",
+              event.cancelled && "line-through decoration-2"
+            )}>
+              {displayTitle}
+            </div>
           </div>
           <EventTime
             start={startLabel}
@@ -263,19 +271,22 @@ export function CalendarBlock({
         </div>
       ) : (
         <div className="flex h-full min-h-0 flex-col">
-          <div
-            className={cn(
-              "min-h-0 overflow-hidden whitespace-normal break-words font-medium text-fg",
-              usesDenseLayout ? "text-[9px] leading-[11px]" : "pr-5 text-[12px] leading-[14px]",
-              event.cancelled && "line-through decoration-2"
-            )}
-            style={{
-              display: "-webkit-box",
-              WebkitBoxOrient: "vertical",
-              WebkitLineClamp: titleLineCount,
-            }}
-          >
-            {displayTitle}
+          <div className="flex min-h-0 items-start gap-1.5">
+            <CalendarEventIdentity event={event} size={usesDenseLayout ? "tiny" : "normal"} />
+            <div
+              className={cn(
+                "min-h-0 min-w-0 overflow-hidden whitespace-normal break-words font-medium text-fg",
+                usesDenseLayout ? "text-[9px] leading-[11px]" : "pr-5 text-[12px] leading-[14px]",
+                event.cancelled && "line-through decoration-2"
+              )}
+              style={{
+                display: "-webkit-box",
+                WebkitBoxOrient: "vertical",
+                WebkitLineClamp: titleLineCount,
+              }}
+            >
+              {displayTitle}
+            </div>
           </div>
           <EventTime
             start={startLabel}

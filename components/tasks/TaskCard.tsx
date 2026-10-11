@@ -2,6 +2,7 @@
 
 import { useDraggable } from "@dnd-kit/core";
 import { GripVertical, Repeat } from "lucide-react";
+import { addMinutes, format } from "date-fns";
 import { blockColor, PROJECTS } from "@/lib/projects";
 import { humanDeadline, humanDuration } from "@/lib/time";
 import type { Task } from "@/lib/types";
@@ -30,6 +31,15 @@ export function TaskCard({ task }: { task: Task }) {
   const project = PROJECTS[task.project];
   const rec = recurrenceLabel(task);
   const toggle = useStore((s) => s.toggleComplete);
+  const events = useStore((s) => s.events);
+  const scheduledEvents = events
+    .filter((event) => event.taskId === task.id && !event.cancelled)
+    .sort((first, second) => first.start.localeCompare(second.start));
+  const scheduledMinutes = scheduledEvents.reduce(
+    (sum, event) => sum + event.durationMinutes,
+    0
+  );
+  const firstScheduledEvent = scheduledEvents[0];
 
   return (
     <div
@@ -79,6 +89,15 @@ export function TaskCard({ task }: { task: Task }) {
             />
             {project.label}
           </span>
+          {firstScheduledEvent ? (
+            <span className="text-[var(--gold-strong)]" title={`${scheduledMinutes} of ${task.durationMinutes} minutes scheduled`}>
+              {scheduledMinutes < task.durationMinutes ? "Partly scheduled · " : "Scheduled "}
+              {format(new Date(firstScheduledEvent.start), "EEE d MMM, HH:mm")}–{format(addMinutes(new Date(firstScheduledEvent.start), firstScheduledEvent.durationMinutes), "HH:mm")}
+              {scheduledEvents.length > 1 ? ` · +${scheduledEvents.length - 1} sessions` : ""}
+            </span>
+          ) : task.deadline && !task.completed ? (
+            <span className="text-[var(--event-user-accent)]">Not scheduled</span>
+          ) : null}
         </div>
       </div>
 

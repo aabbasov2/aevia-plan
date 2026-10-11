@@ -11,7 +11,7 @@ const SIDEBAR_VISIBILITY_KEY = "aevia-sidebar-hidden";
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [sidebarHidden, setSidebarHidden] = useState(false);
-  const isMvpRoute = pathname === "/today" || pathname === "/tasks" || pathname === "/calendar";
+  const isMvpRoute = pathname === "/today" || pathname === "/tasks" || pathname === "/calendar" || pathname === "/aevia" || pathname === "/thoughts";
 
   useEffect(() => {
     setSidebarHidden(window.localStorage.getItem(SIDEBAR_VISIBILITY_KEY) === "true");
@@ -22,7 +22,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     window.localStorage.setItem(SIDEBAR_VISIBILITY_KEY, String(hidden));
   }
 
-  if (pathname === "/pitch") return <>{children}</>;
+  if (pathname === "/pitch" || pathname === "/signin" || pathname === "/settings/password") return <>{children}</>;
   if (!isMvpRoute) return <ComingSoon />;
 
   return (
