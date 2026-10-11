@@ -103,20 +103,18 @@ export default function TodayPage() {
         <SummaryCard icon={<CheckCircle2 size={17} />} label="Tasks" value={todayData ? `${todayData.completed}/${todayData.dayTasks.length}` : "—"} sub={todayData?.dayTasks.length ? "completed today" : "due or scheduled today"} tone="green" progress={todayData && todayData.dayTasks.length ? todayData.completed / todayData.dayTasks.length : undefined} onClick={() => scrollToSection("today-tasks")} />
         <SummaryCard icon={<CalendarDays size={17} />} label="Calendar" value={todayData ? `${todayData.todaysEvents.length} events` : "—"} sub={todayData?.upcoming ? `Next ${format(new Date(todayData.upcoming.start), "HH:mm")}` : "No more events today"} tone="rose" onClick={() => scrollToSection("today-timeline")} />
         <SummaryCard icon={<Clock3 size={17} />} label="Work planned" value={todayData ? `${Math.floor(todayData.workMinutes / 60)}h${todayData.workMinutes % 60 ? ` ${todayData.workMinutes % 60}m` : ""}` : "—"} sub="Task time on today’s calendar" tone="gold" onClick={() => scrollToSection("today-timeline")} />
-        <SummaryCard icon={health.state === "wont-fit" ? <AlertTriangle size={17} /> : <Check size={17} />} label="Plan" value={health.state === "on-track" ? "On track" : health.state === "needs-attention" ? "Needs attention" : "Tight"} sub={health.state === "wont-fit" ? `${health.shortfallHours}h over capacity` : health.state === "needs-attention" ? `${health.unscheduledHours}h still to place` : `${health.remainingHours}h task time remaining`} tone={health.state === "wont-fit" ? "rose" : "green"} onClick={() => scrollToSection("today-plan-status")} />
+        <SummaryCard icon={health.state === "wont-fit" ? <AlertTriangle size={17} /> : <Check size={17} />} label="Plan" value={health.state === "on-track" ? "On track" : health.state === "needs-attention" ? "Needs attention" : "Tight"} sub={health.state === "wont-fit" ? `${health.shortfallHours}h over capacity` : health.state === "needs-attention" ? `${health.unscheduledHours}h still to place` : `${health.remainingHours}h task time remaining`} tone={health.state === "wont-fit" ? "rose" : "green"} onClick={() => scrollToSection("today-tasks")} />
       </section>
 
       <div className="mt-5 grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1.22fr)_minmax(380px,0.88fr)] xl:gap-4">
-        <TodayTimeline now={now ?? new Date()} onCreateEvent={(start) => { setCreateEventStart(start); setCreateEventOpen(true); }} onFocusTask={(taskId) => setFocusTaskRequest(taskId)} />
+        <div className="flex min-w-0 flex-col gap-4">
+          <TodayTimeline now={now ?? new Date()} onCreateEvent={(start) => { setCreateEventStart(start); setCreateEventOpen(true); }} onFocusTask={(taskId) => setFocusTaskRequest(taskId)} />
+          <TodayTasksPanel onFocusTask={(taskId) => { setFocusTaskRequest(taskId); document.getElementById("today-focus")?.scrollIntoView({ behavior: "smooth", block: "center" }); }} />
+        </div>
         <div className="flex min-w-0 flex-col gap-4">
           <TodayCommandPanel />
           <FocusWidget requestedTaskId={focusTaskRequest} />
         </div>
-      </div>
-
-      <div className="mt-4 grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1.22fr)_minmax(380px,0.88fr)] xl:gap-4">
-        <TodayTasksPanel onFocusTask={(taskId) => { setFocusTaskRequest(taskId); document.getElementById("today-focus")?.scrollIntoView({ behavior: "smooth", block: "center" }); }} />
-        <PlanStatusCard health={health} />
       </div>
     </div>
     <CreateTaskModal open={createTaskOpen} onOpenChange={setCreateTaskOpen} />
@@ -164,13 +162,4 @@ function SummaryCard({ icon, label, value, sub, tone, progress, onClick }: { ico
     <div className="mt-1 truncate text-[10px] text-fg-subtle">{sub}</div>
     {progress !== undefined && <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-[#62c991] transition-all" style={{ width: `${Math.max(0, Math.min(100, progress * 100))}%` }} /></div>}
   </button>;
-}
-
-function PlanStatusCard({ health }: { health: ReturnType<typeof derivePlanHealth> }) {
-  const title = health.state === "on-track" ? "Your week has room." : health.state === "needs-attention" ? "A few tasks need a time." : "Your week is over capacity.";
-  const detail = health.state === "on-track" ? `${health.remainingHours}h of remaining work fits in your available calendar.` : health.state === "needs-attention" ? `${health.unscheduledHours}h still needs scheduling. Aevia can find open blocks before the deadlines.` : `You need ${health.shortfallHours}h more time before ${health.deadlineLabel}. Review the tasks competing for space.`;
-  return <section id="today-plan-status" className="today-card flex min-h-[150px] items-center gap-4 rounded-2xl p-5 sm:p-6">
-    <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${health.state === "wont-fit" ? "bg-[#e67b89]/10 text-[#e67b89]" : "bg-[var(--gold-soft)] text-gold"}`}>{health.state === "wont-fit" ? <AlertTriangle size={19} /> : <CheckCircle2 size={19} />}</div>
-    <div className="min-w-0"><p className="text-[14px] font-medium text-fg">{title}</p><p className="mt-1 max-w-lg text-[11px] leading-5 text-fg-muted">{detail}</p></div>
-  </section>;
 }
