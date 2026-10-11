@@ -20,6 +20,7 @@ import { SidebarSearch } from "./SidebarSearch";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useProfile } from "@/components/shell/ProfileProvider";
 
 export function Sidebar({
   hidden,
@@ -89,6 +90,7 @@ export function Sidebar({
 }
 
 function AccountMenu({ compact = false }: { compact?: boolean }) {
+  const { displayName } = useProfile();
   const [email, setEmail] = useState("");
 
   useEffect(() => {
@@ -106,9 +108,9 @@ function AccountMenu({ compact = false }: { compact?: boolean }) {
 
   if (!email) return null;
   return <div className="flex items-center justify-between gap-2">
-    {!compact && <span className="min-w-0 truncate text-[11px] text-fg-muted" title={email}>{email}</span>}
+    {!compact && <span className="min-w-0 truncate text-[11px] text-fg-muted" title={email}>{displayName || email}</span>}
     <div className="flex shrink-0 items-center gap-1">
-      <Link href="/settings/password" className="btn btn-ghost h-8 w-8 p-0" aria-label="Account settings" title="Change password"><Settings2 size={14} /></Link>
+      <Link href="/settings/password" className="btn btn-ghost h-8 w-8 p-0" aria-label="Account settings" title="Account settings"><Settings2 size={14} /></Link>
       <button type="button" className="btn btn-ghost h-8 w-8 p-0" aria-label="Sign out" title="Sign out" onClick={async () => { try { await createClient().auth.signOut(); window.location.assign("/signin"); } catch { window.location.assign("/signin"); } }}><LogOut size={14} /></button>
     </div>
   </div>;

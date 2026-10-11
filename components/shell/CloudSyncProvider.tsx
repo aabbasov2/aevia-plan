@@ -22,11 +22,24 @@ type Workspace = {
 };
 type LoadResult = { revision: number | string; has_workspace: boolean; state: Workspace | null };
 type Phase = "loading" | "ready" | "import" | "error";
+const AUTH_REQUEST_TIMEOUT_MS = 15_000;
+const WORKSPACE_REQUEST_TIMEOUT_MS = 20_000;
+
+function withTimeout<T>(request: PromiseLike<T>, timeoutMs: number, description: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = window.setTimeout(() => reject(new Error(description)), timeoutMs);
+    Promise.resolve(request).then(
+      (value) => { window.clearTimeout(timeout); resolve(value); },
+      (error) => { window.clearTimeout(timeout); reject(error); },
+    );
+  });
+}
 
 export function CloudSyncProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const isPublicRoute = pathname === "/signin";
   const [phase, setPhase] = useState<Phase>("loading");
+  const [loadingMessage, setLoadingMessage] = useState("Checking your sign-in…");
   const [syncError, setSyncError] = useState("");
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [importCandidate, setImportCandidate] = useState<Workspace | null>(null);
@@ -105,6 +118,7 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
     disposeSync();
     currentUserId.current = userId;
     setPhase("loading");
+    setLoadingMessage("Loading your private plan…");
     setSyncError("");
     blockedByConflict.current = false;
     const lastAccount = localStorage.getItem(LAST_ACCOUNT_KEY);
@@ -113,8 +127,21 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
     await useStore.persist.rehydrate();
     const local = snapshotLocalWorkspace();
     const hasAccountScopedLocal = hasScopedStoreData(userId);
-    const { data, error } = await createClient().rpc("load_aevia_workspace");
-    if (error) throw error;
+    const { data, error } = await withTimeout(
+      createClient().rpc("load_aevia_workspace"),
+      WORKSPACE_REQUEST_TIMEOUT_MS,
+      "Supabase took too long to load your plan. Check your connection and try again.",
+    );
+    if (error) {
+      const message = error.message.toLowerCase();
+      if (error.code === "PGRST202" || message.includes("could not find the function") || message.includes("schema cache")) {
+        throw new Error("Aevia’s workspace database setup is missing. Apply the Aevia alpha migration in Supabase, then try again.");
+      }
+      if (error.code === "42501" || message.includes("permission denied")) {
+        throw new Error("Supabase denied access to Aevia’s workspace. Check that the alpha migration completed successfully.");
+      }
+      throw error;
+    }
     const loaded = data as LoadResult;
     revision.current = Number(loaded.revision ?? 0);
 
@@ -165,7 +192,12 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
     async function start() {
       try {
         const supabase = createClient();
-        const { data, error } = await supabase.auth.getUser();
+        setLoadingMessage("Checking your sign-in…");
+        const { data, error } = await withTimeout(
+          supabase.auth.getUser(),
+          AUTH_REQUEST_TIMEOUT_MS,
+          "Supabase sign-in is taking too long. Check your connection and try again.",
+        );
         if (error || !data.user) throw new Error("Your session has expired. Sign in again to open your plan.");
         if (cancelled || active) return;
         active = true;
@@ -230,7 +262,7 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
 
   if (isPublicRoute) return <>{children}</>;
   if (phase === "loading" || phase === "error") return <main className="flex min-h-screen items-center justify-center px-6"><div className="card w-full max-w-md p-6 text-center">
-    {phase === "loading" ? <><LoaderCircle className="mx-auto animate-spin text-gold" size={24} /><p className="mt-4 text-[14px] text-fg">Opening your private plan…</p></> : <><AlertTriangle className="mx-auto text-[#e67b89]" size={24} /><p className="mt-4 text-[14px] text-fg">{syncError || "We couldn’t open your private plan."}</p><div className="mt-5 flex justify-center gap-2"><button type="button" className="btn" onClick={() => window.location.assign("/signin")}>Sign in again</button><button type="button" className="btn btn-gold" onClick={() => window.location.reload()}>Try again</button></div></>}
+    {phase === "loading" ? <><LoaderCircle className="mx-auto animate-spin text-gold" size={24} /><p className="mt-4 text-[14px] text-fg">Opening your private plan…</p><p className="mt-2 text-[11px] text-fg-muted">{loadingMessage}</p></> : <><AlertTriangle className="mx-auto text-[#e67b89]" size={24} /><p className="mt-4 text-[14px] text-fg">{syncError || "We couldn’t open your private plan."}</p><div className="mt-5 flex justify-center gap-2"><button type="button" className="btn" onClick={() => window.location.assign("/signin")}>Sign in again</button><button type="button" className="btn btn-gold" onClick={() => window.location.reload()}>Try again</button></div></>}
   </div></main>;
   if (phase === "import") return <main className="flex min-h-screen items-center justify-center px-6"><section className="card w-full max-w-lg p-6 sm:p-8"><Cloud className="text-gold" size={24} /><h1 className="mt-4 text-[20px] font-medium text-fg">{importMode === "unsynced-conflict" ? "Choose which plan to keep" : importMode === "first-device-merge" ? "Merge this browser with your plan?" : "Bring this browser’s plan?"}</h1><p className="mt-2 text-[13px] leading-6 text-fg-muted">{importMode === "unsynced-conflict" ? "This browser has changes that didn’t finish syncing. Keep those changes, or load the latest saved plan from your account." : importMode === "first-device-merge" ? `This browser has ${importCandidate?.tasks.length ?? 0} tasks, ${importCandidate?.events.length ?? 0} events, and ${importCandidate?.capturedDistractions.length ?? 0} thoughts saved locally. Your account already has a cloud plan. Merge only if the browser data belongs to this account.` : <>This browser has {importCandidate?.tasks.length ?? 0} tasks, {importCandidate?.events.length ?? 0} events, and {importCandidate?.capturedDistractions.length ?? 0} thoughts saved locally. That older data was not tied to an account. Import it only if it belongs to this account.</>}</p><div className="mt-5 flex flex-wrap gap-2"><button type="button" className="btn btn-gold" onClick={() => void chooseImport(true)}>{importMode === "unsynced-conflict" ? "Keep browser changes" : importMode === "first-device-merge" ? "Merge both plans" : "Import this plan"}</button><button type="button" className="btn" onClick={() => void chooseImport(false)}>{importMode === "unsynced-conflict" || importMode === "first-device-merge" ? "Use cloud plan" : "Start with a clean plan"}</button></div></section></main>;
 

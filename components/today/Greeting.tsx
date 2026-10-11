@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { greetingFor, longDate } from "@/lib/time";
 
-export function Greeting({ name = "Aziz" }: { name?: string }) {
+export function Greeting({ name = "there" }: { name?: string }) {
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
     setNow(new Date());

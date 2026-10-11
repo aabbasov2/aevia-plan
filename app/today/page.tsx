@@ -11,6 +11,7 @@ import { TodayCommandPanel } from "@/components/aevia/TodayCommandPanel";
 import { FocusWidget } from "@/components/today/FocusWidget";
 import { CreateTaskModal } from "@/components/tasks/CreateTaskModal";
 import { CreateEventModal } from "@/components/calendar/CreateEventModal";
+import { useProfile } from "@/components/shell/ProfileProvider";
 import type { TodayBackground } from "@/lib/store";
 
 const scenes: Array<{ id: TodayBackground; label: string; image: string }> = [
@@ -21,6 +22,7 @@ const scenes: Array<{ id: TodayBackground; label: string; image: string }> = [
 ];
 
 export default function TodayPage() {
+  const { displayName } = useProfile();
   const tasks = useStore((state) => state.tasks);
   const events = useStore((state) => state.events);
   const preferences = useStore((state) => state.plannerPreferences);
@@ -68,7 +70,8 @@ export default function TodayPage() {
         <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
           <div>
             <p className="text-[12px] tracking-wide text-fg-muted">{now ? format(now, "EEEE, d MMMM") : ""}</p>
-            <h1 className="mt-1 text-[34px] font-medium leading-[1.12] tracking-[-0.035em] text-fg sm:text-[40px]">{greeting}, Aziz.</h1>
+            <h1 className="mt-1 text-[34px] font-medium leading-[1.12] tracking-[-0.035em] text-fg sm:text-[40px]">{greeting}{displayName ? `, ${displayName}` : ""}.</h1>
+            {!displayName && <a href="/settings/password" className="mt-1 inline-block text-[11px] text-gold hover:underline">Add your name in account settings</a>}
             <p className="mt-2 max-w-xl text-[14px] leading-6 text-fg-muted">You tell Aevia what. Aevia finds the when.</p>
           </div>
           <LocalDigitalClock />

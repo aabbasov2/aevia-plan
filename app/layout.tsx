@@ -4,6 +4,7 @@ import "./globals.css";
 import { Providers } from "./providers";
 import { AppShell } from "@/components/shell/AppShell";
 import { CloudSyncProvider } from "@/components/shell/CloudSyncProvider";
+import { ProfileProvider } from "@/components/shell/ProfileProvider";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -28,7 +29,9 @@ export default function RootLayout({
       <body className="font-sans">
         <Providers>
           <CloudSyncProvider>
-            <AppShell>{children}</AppShell>
+            <ProfileProvider>
+              <AppShell>{children}</AppShell>
+            </ProfileProvider>
           </CloudSyncProvider>
         </Providers>
       </body>
