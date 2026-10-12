@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { generateGeminiContent } from "@/lib/gemini";
 
+export const maxDuration = 30;
+
 export async function POST(request: Request) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "Gemini is not configured. Add GEMINI_API_KEY to .env.local and restart Aevia." }, { status: 503 });

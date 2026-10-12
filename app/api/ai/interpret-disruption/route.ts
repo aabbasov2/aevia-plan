@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { generateGeminiContent } from "@/lib/gemini";
 
+export const maxDuration = 30;
+
 const responseSchema = {
   type: "OBJECT",
   properties: {

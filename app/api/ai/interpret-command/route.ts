@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { generateGeminiContent } from "@/lib/gemini";
 
+export const maxDuration = 30;
+
 const MAX_INPUT_LENGTH = 2000;
 
 const responseSchema = {
