@@ -1,65 +1,30 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { AeviaArc } from "@/components/brand/AeviaArc";
 import { useStore } from "@/lib/store";
 import { deriveMetrics } from "@/lib/plan-health";
 import { CreateTaskModal } from "@/components/tasks/CreateTaskModal";
 import { DayRecoveryModal } from "@/components/aevia/DayRecoveryModal";
 import { formatHm } from "@/lib/time";
-import { addMinutes, format } from "date-fns";
 
 export function AeviaPanel({ variant = "rail" }: { variant?: "rail" | "hero" }) {
   const tasks = useStore((s) => s.tasks);
   const events = useStore((s) => s.events);
   const preferences = useStore((s) => s.plannerPreferences);
-  const planWeek = useStore((s) => s.planWeek);
   const m = deriveMetrics(tasks, events, preferences);
   const [pulse, setPulse] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [captureOpen, setCaptureOpen] = useState(false);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
 
-  function onPlan() {
-    setPulse(true);
-    const plan = planWeek();
-    if (plan.scheduledMinutes === 0 && plan.unscheduled.length === 0) {
-      setResult("Everything that can fit is already planned.");
-    } else if (plan.unscheduled.length > 0) {
-      setResult(`${plan.scheduledTaskCount} task${plan.scheduledTaskCount === 1 ? "" : "s"} planned · ${plan.unscheduled.length} need${plan.unscheduled.length === 1 ? "s" : ""} attention`);
-    } else {
-      setResult(`${plan.scheduledTaskCount} task${plan.scheduledTaskCount === 1 ? "" : "s"} planned · ${Math.round(plan.scheduledMinutes / 60 * 10) / 10}h placed`);
-    }
-    setTimeout(() => setPulse(false), 1500);
-  }
-
   function onTaskCreated(taskId: string) {
     setPulse(true);
     const state = useStore.getState();
     const task = state.tasks.find((item) => item.id === taskId);
     if (!task) return;
-    const scheduled = state.events
-      .filter((event) => event.taskId === taskId && !event.cancelled)
-      .sort((first, second) => first.start.localeCompare(second.start));
-
-    if (scheduled.length === 0 && !task.deadline) {
-      setResult("Task added · add a deadline for automatic scheduling.");
-    } else if (scheduled.length === 0) {
-      setResult("Task added · no open time was found before the deadline.");
-    } else {
-      const first = scheduled[0];
-      const start = new Date(first.start);
-      const end = addMinutes(start, first.durationMinutes);
-      const scheduledMinutes = scheduled.reduce(
-        (sum, event) => sum + event.durationMinutes,
-        0
-      );
-      const remainingMinutes = Math.max(0, task.durationMinutes - scheduledMinutes);
-      const extraSessions = scheduled.length - 1;
-      setResult(
-        `${remainingMinutes > 0 ? "Task partly scheduled" : "Task scheduled"} · ${format(start, "EEE, MMM d")} ${format(start, "HH:mm")}–${format(end, "HH:mm")}${extraSessions > 0 ? ` · ${extraSessions} more session${extraSessions === 1 ? "" : "s"}` : ""}${remainingMinutes > 0 ? ` · ${remainingMinutes}m still needs a slot` : ""}`
-      );
-    }
+    setResult(`“${task.title}” added. Open Aevia chat to review a schedule preview.`);
     setTimeout(() => setPulse(false), 1500);
   }
 
@@ -92,9 +57,7 @@ export function AeviaPanel({ variant = "rail" }: { variant?: "rail" | "hero" }) 
           <button onClick={() => setRecoveryOpen(true)} className="btn">
             My day changed
           </button>
-          <button onClick={onPlan} className="btn">
-            Replan this week
-          </button>
+          <Link href="/today" className="btn">Open Aevia chat</Link>
         </div>
         {result && <p className="mt-3 text-[12px] text-fg-muted">{result}</p>}
         <p className="mt-3 text-[11px] text-fg-subtle">
@@ -105,6 +68,7 @@ export function AeviaPanel({ variant = "rail" }: { variant?: "rail" | "hero" }) 
         open={captureOpen}
         onOpenChange={setCaptureOpen}
         onCreated={onTaskCreated}
+        deferScheduling
       />
       <DayRecoveryModal open={recoveryOpen} onOpenChange={setRecoveryOpen} />
     </>

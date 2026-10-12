@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import { addDays } from "date-fns";
-import type { CalendarEvent, Commitment, InboxItem, PlannerPreferences, Task } from "./types";
+import type { AssistantMessage, CalendarEvent, Commitment, InboxItem, PlannerPreferences, Task } from "./types";
 import { weekStart } from "./time";
 import { buildPlan, MAX_FOCUS_BLOCK_MINUTES, planningWeekStart } from "./planner";
 import { DEFAULT_PLANNER_PREFERENCES } from "./preferences";
@@ -81,6 +81,8 @@ type State = {
   focusHistory: FocusSession[];
   capturedDistractions: CapturedDistraction[];
   inboxItems: InboxItem[];
+  assistantMessages: AssistantMessage[];
+  appendAssistantMessage: (message: Pick<AssistantMessage, "role" | "content">) => void;
   startFocusSession: (taskId: string | undefined, durationMinutes: number, kind?: FocusSessionKind) => boolean;
   pauseFocus: () => void;
   resumeFocus: () => void;
@@ -123,6 +125,7 @@ type State = {
     durationMinutes: number
   ) => void;
   planWeek: (baseWeekMs?: number) => { scheduledTaskCount: number; scheduledMinutes: number; unscheduled: string[] };
+  applyPlanPreview: (baseWeekMs: number, blocks: Array<{ taskId: string; start: string; durationMinutes: number }>) => boolean;
   updatePlannerPreferences: (preferences: PlannerPreferences) => void;
   ensureLunchEvents: (baseWeekMs?: number) => boolean;
   createCommitment: (c: Omit<Commitment, "id">) => void;
@@ -273,6 +276,7 @@ function migratePersistedWorkspace(savedState: Partial<State>, currentState: Sta
     focusHistory: migratedHistory,
     capturedDistractions: migratedThoughts,
     inboxItems: migratedInboxItems,
+    assistantMessages: savedState.assistantMessages ?? currentState.assistantMessages,
     todayBackground: savedState.todayBackground ?? currentState.todayBackground,
   };
 }
@@ -297,6 +301,10 @@ export const useStore = create<State>()(persist((set, get) => ({
   focusHistory: [],
   capturedDistractions: [],
   inboxItems: [],
+  assistantMessages: [],
+  appendAssistantMessage: (message) => set((state) => ({
+    assistantMessages: [...state.assistantMessages, { ...message, id: newUuid(), createdAt: Date.now() }].slice(-100),
+  })),
   startFocusSession: (taskId, durationMinutes, kind = "focus") => {
     const { focusSession, tasks } = get();
     if (focusSession && (focusSession.status === "running" || focusSession.status === "paused")) return false;
@@ -692,20 +700,35 @@ export const useStore = create<State>()(persist((set, get) => ({
       return { overlaps, conflicts: [], displaced: [], replacements: [], unscheduledTaskTitles: [] };
     }
 
-    const affectedTaskIds = new Set(conflicts.map((event) => event.taskId).filter((id): id is string => Boolean(id)));
+    const now = new Date();
     const targetWeek = weekStart(addedStart);
     const targetWeekEnd = addDays(targetWeek, 7);
     const replaceable = events.filter((event) =>
-      event.taskId && affectedTaskIds.has(event.taskId) &&
+      event.taskId &&
       event.kind === "task" && !event.cancelled && !event.locked && event.origin === "aevia" &&
-      new Date(event.start) >= targetWeek && new Date(event.start) < targetWeekEnd
+      new Date(event.start) >= targetWeek && new Date(event.start) < targetWeekEnd && new Date(event.start) >= now
     );
     const replaceIds = new Set(replaceable.map((event) => event.id));
     const stableEvents = events.filter((event) => !replaceIds.has(event.id));
-    const affectedTasks = tasks.filter((task) => affectedTaskIds.has(task.id) && !task.completed);
-    const plan = buildPlan(affectedTasks, stableEvents, plannerPreferences, new Date(), targetWeek);
+    const replannedTaskIds = new Set(replaceable.map((event) => event.taskId).filter((id): id is string => Boolean(id)));
+    const replannedTasks = tasks.filter((task) => replannedTaskIds.has(task.id) && !task.completed);
+    const firstPlan = buildPlan(replannedTasks, stableEvents, plannerPreferences, now, targetWeek);
+    const firstUnscheduledIds = new Set(firstPlan.unscheduled);
+    const overlapsAddedEvent = (event: CalendarEvent) => {
+      const start = new Date(event.start);
+      const end = new Date(start.getTime() + event.durationMinutes * 60_000);
+      return start < addedEnd && end > addedStart;
+    };
+    const preservedEvents = replaceable.filter((event) =>
+      firstUnscheduledIds.has(event.taskId!) && !overlapsAddedEvent(event)
+    );
+    const preservedIds = new Set(preservedEvents.map((event) => event.id));
+    const plan = preservedEvents.length
+      ? buildPlan(replannedTasks, [...stableEvents, ...preservedEvents], plannerPreferences, now, targetWeek)
+      : firstPlan;
     const unscheduledIds = new Set(plan.unscheduled);
     const replacements = plan.blocks
+      .filter((block) => !unscheduledIds.has(block.task.id))
       .map((block) => ({
         title: block.task.title,
         start: block.start,
@@ -716,12 +739,15 @@ export const useStore = create<State>()(persist((set, get) => ({
         colorIndex: block.task.colorIndex ?? 3,
         origin: "aevia" as const,
       }));
+    const displaced = replaceable.filter((event) =>
+      !preservedIds.has(event.id) && (!unscheduledIds.has(event.taskId!) || overlapsAddedEvent(event))
+    );
     return {
       overlaps,
       conflicts,
-      displaced: replaceable,
+      displaced,
       replacements,
-      unscheduledTaskTitles: affectedTasks.filter((task) => unscheduledIds.has(task.id)).map((task) => task.title),
+      unscheduledTaskTitles: replannedTasks.filter((task) => unscheduledIds.has(task.id)).map((task) => task.title),
     };
   },
 
@@ -984,6 +1010,49 @@ export const useStore = create<State>()(persist((set, get) => ({
       scheduledMinutes: acceptedBlocks.reduce((sum, block) => sum + block.durationMinutes, 0),
       unscheduled: plan.unscheduled,
     };
+  },
+  applyPlanPreview: (baseWeekMs, proposedBlocks) => {
+    const now = new Date();
+    const targetWeek = weekStart(new Date(baseWeekMs));
+    const targetWeekEnd = addDays(targetWeek, 7);
+    const { tasks, events, plannerPreferences } = get();
+    const completedTaskIds = new Set(tasks.filter((task) => task.completed).map((task) => task.id));
+    const isManagedEvent = (event: CalendarEvent) => {
+      if (event.kind !== "task" || !event.taskId || event.cancelled || completedTaskIds.has(event.taskId) || event.locked || event.origin === "user") return false;
+      const start = new Date(event.start);
+      return start >= targetWeek && start < targetWeekEnd && start >= now;
+    };
+    const managedEvents = events.filter(isManagedEvent);
+    const stableEvents = events.filter((event) => !isManagedEvent(event));
+    const plan = buildPlan(tasks, stableEvents, plannerPreferences, now, targetWeek);
+    const unscheduledIds = new Set(plan.unscheduled);
+    const currentBlocks = plan.blocks
+      .filter((block) => !unscheduledIds.has(block.task.id))
+      .map((block) => ({ taskId: block.task.id, start: block.start, durationMinutes: block.durationMinutes }));
+    if (JSON.stringify(currentBlocks) !== JSON.stringify(proposedBlocks)) return false;
+
+    const fallbackEvents = managedEvents.filter((event) => event.taskId && unscheduledIds.has(event.taskId));
+    set((state) => {
+      const usedIds = new Set(state.events.map((event) => event.id));
+      return {
+        events: [
+          ...stableEvents,
+          ...fallbackEvents,
+          ...plan.blocks.filter((block) => !unscheduledIds.has(block.task.id)).map((block) => ({
+            id: nextEntityId("e", usedIds),
+            title: block.task.title,
+            start: block.start,
+            durationMinutes: block.durationMinutes,
+            kind: "task" as const,
+            project: block.task.project,
+            taskId: block.task.id,
+            colorIndex: block.task.colorIndex ?? 3,
+            origin: "aevia" as const,
+          })),
+        ],
+      };
+    });
+    return true;
   },
   scheduleUnscheduledTask: (taskId) => {
     const now = new Date();

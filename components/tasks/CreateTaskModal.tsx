@@ -28,11 +28,13 @@ export function CreateTaskModal({
   onOpenChange,
   onCreated,
   initialRequest,
+  deferScheduling = false,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onCreated?: (taskId: string) => void;
   initialRequest?: string;
+  deferScheduling?: boolean;
 }) {
   const createTask = useStore((s) => s.createTask);
   const scheduleTaskAt = useStore((s) => s.scheduleTaskAt);
@@ -48,7 +50,8 @@ export function CreateTaskModal({
   const [interpreting, setInterpreting] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiClarification, setAiClarification] = useState<string | null>(null);
-  const [focusBlockMinutes, setFocusBlockMinutes] = useState(60);
+  const [focusBlockMinutes, setFocusBlockMinutes] = useState(120);
+  const [splitIntoSessions, setSplitIntoSessions] = useState(false);
 
   useEffect(() => {
     if (open && initialRequest) {
@@ -65,13 +68,14 @@ export function CreateTaskModal({
       title: title.trim(),
       durationMinutes: duration,
       focusBlockMinutes,
+      splitPreference: splitIntoSessions,
       deadline: deadline ? new Date(deadline).toISOString() : undefined,
       recurrence: { kind: recurrence } as Recurrence,
       project,
       notes: notes.trim() || undefined,
       colorIndex: colorForProject(project),
     }, {
-      autoSchedule: !scheduleAt,
+      autoSchedule: !scheduleAt && !deferScheduling,
     });
     if (scheduleAt) scheduleTaskAt(taskId, new Date(scheduleAt).toISOString());
     reset();
@@ -91,7 +95,8 @@ export function CreateTaskModal({
     setRequest("");
     setAiError(null);
     setAiClarification(null);
-    setFocusBlockMinutes(60);
+    setFocusBlockMinutes(120);
+    setSplitIntoSessions(false);
   }
 
   async function interpretRequest() {
@@ -117,6 +122,7 @@ export function CreateTaskModal({
       setDeadline(data.deadlineDate ? `${data.deadlineDate}T23:59` : "");
       setProject(data.project);
       setFocusBlockMinutes(data.sessionMinutes);
+      setSplitIntoSessions(Boolean(data.splitIntoSessions));
       setAiClarification(data.needsClarification ? data.clarification : null);
       if (!data.needsClarification) setMode("manual");
     } catch (error) {
@@ -160,7 +166,7 @@ export function CreateTaskModal({
                 autoFocus
               />
             </Field>
-            <p className="text-[12px] leading-5 text-fg-muted">Aevia will extract the deadline and effort, break long work into focus sessions, and find open calendar time for you to review.</p>
+            <p className="text-[12px] leading-5 text-fg-muted">Aevia keeps work in a solid block whenever it can. Longer tasks can use a few substantial sessions, then you can review the schedule before applying it.</p>
             {aiError && <p role="alert" className="text-[12px] text-[#d39a76]">{aiError}</p>}
             {aiClarification && <p className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 text-[12px] text-fg-muted">{aiClarification}</p>}
           </div>
@@ -272,7 +278,7 @@ export function CreateTaskModal({
           {mode === "manual" && request && (
             <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 text-[12px] text-fg-muted">
               <div className="wordmark mb-1 text-[10px]">Aevia understood</div>
-              {title} · {Math.floor(duration / 60)}h{duration % 60 ? ` ${duration % 60}m` : ""}{deadline ? ` · by ${new Date(deadline).toLocaleDateString()}` : ""} · focus sessions up to {focusBlockMinutes}m
+              {title} · {Math.floor(duration / 60)}h{duration % 60 ? ` ${duration % 60}m` : ""}{deadline ? ` · by ${new Date(deadline).toLocaleDateString()}` : ""}{splitIntoSessions ? ` · split into sessions up to ${focusBlockMinutes}m` : " · one solid block when available"}
             </div>
           )}
         </div>

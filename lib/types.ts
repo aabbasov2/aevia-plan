@@ -18,6 +18,8 @@ export type Task = {
   durationMinutes: number;
   /** Preferred maximum length of each Aevia-planned focus session. */
   focusBlockMinutes?: number;
+  /** Whether the user asked for this task to be split across focus sessions. */
+  splitPreference?: boolean;
   deadline?: string; // ISO date
   recurrence: Recurrence;
   project: ProjectKey;
@@ -26,6 +28,13 @@ export type Task = {
   sourceDistractionId?: string;
   completed?: boolean;
   colorIndex?: number; // 1..6
+};
+
+export type AssistantMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: number;
 };
 
 export type CalendarEvent = {

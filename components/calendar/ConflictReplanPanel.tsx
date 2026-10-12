@@ -28,7 +28,23 @@ export function ConflictReplanPanel({
             </li>
           ))}
         </ul>
+        {proposal.conflicts.length > 0 && (
+          <p className="mt-3 text-[11px] leading-4 text-fg-muted">Aevia will reflow flexible task blocks across this week to make room.</p>
+        )}
       </div>
+
+      {proposal.displaced.length > 0 && (
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4">
+          <div className="wordmark text-[10px] text-fg-muted">CURRENT AEVIA BLOCKS TO MOVE OR REMOVE</div>
+          <ul className="mt-2 max-h-36 space-y-2 overflow-y-auto">
+            {proposal.displaced.map((event) => (
+              <li key={event.id} className="text-[12px] text-fg-muted">
+                {event.title} · {format(new Date(event.start), "EEE, MMM d · HH:mm")} ({event.durationMinutes}m)
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {proposal.replacements.length > 0 ? (
         <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4">
@@ -41,21 +57,21 @@ export function ConflictReplanPanel({
             ))}
           </ul>
           {proposal.unscheduledTaskTitles.length > 0 && (
-            <p className="mt-3 text-[12px] text-[#d39a76]">Some time still needs a slot: {proposal.unscheduledTaskTitles.join(", ")}.</p>
+            <p className="mt-3 text-[12px] text-[#d39a76]">Couldn’t fit all remaining time for: {proposal.unscheduledTaskTitles.join(", ")}. Any other existing blocks for these tasks will stay.</p>
           )}
         </div>
       ) : proposal.conflicts.length === 0 ? (
         <p className="text-[12px] text-fg-muted">There are no movable Aevia task sessions in this overlap. You can adjust one of the events on the calendar.</p>
       ) : (
-        <p className="text-[12px] text-[#d39a76]">Aevia couldn’t find another open time for these sessions this week.</p>
+        <p className="text-[12px] text-[#d39a76]">Aevia couldn’t find another open time this week. Applying will remove the overlapping Aevia block; its other non-overlapping blocks will stay.</p>
       )}
 
       <div className="flex justify-end gap-2">
         <button className="btn" onClick={onDismiss}>
           {proposal.conflicts.length ? "Keep schedule" : "Got it"}
         </button>
-        <button className="btn btn-gold" onClick={onApply} disabled={proposal.replacements.length === 0}>
-          Apply suggested times
+        <button className="btn btn-gold" onClick={onApply} disabled={proposal.replacements.length === 0 && proposal.displaced.length === 0}>
+          {proposal.replacements.length > 0 ? "Apply suggested times" : "Remove overlapping task block"}
         </button>
       </div>
     </div>

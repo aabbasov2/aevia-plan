@@ -16,6 +16,7 @@ const responseSchema = {
       enum: ["personal", "university", "work", "aevia", "travel"],
     },
     sessionMinutes: { type: "INTEGER" },
+    splitIntoSessions: { type: "BOOLEAN" },
     needsClarification: { type: "BOOLEAN" },
     clarification: { type: "STRING" },
   },
@@ -25,6 +26,7 @@ const responseSchema = {
     "deadlineDate",
     "project",
     "sessionMinutes",
+    "splitIntoSessions",
     "needsClarification",
     "clarification",
   ],
@@ -66,7 +68,7 @@ export async function POST(request: Request) {
           "Use the supplied current date and IANA timezone when interpreting relative dates and dates without a year. For a date without a year, choose the next occurrence on or after today.",
           "A date-only deadline means the end of that local calendar day. Return deadlineDate as YYYY-MM-DD, or an empty string if no deadline was provided.",
           "Never invent an effort estimate or deadline that the user did not provide. If either is necessary to schedule and missing or unclear, set needsClarification=true and ask one concise question.",
-          "Suggested focus sessions should be between 25 and 60 minutes, with shorter sessions for draining or long tasks. Do not create semantic subtasks unless the user described them.",
+          "Keep each task in one uninterrupted calendar block by default, up to 120 minutes. Set sessionMinutes equal to the total task duration when it is 120 minutes or less. Set splitIntoSessions=false unless the user explicitly asks to split the work. For tasks longer than 120 minutes, set splitIntoSessions=true and choose substantial sessions between 60 and 120 minutes. Do not create semantic subtasks unless the user described them.",
           "Use project 'work' when no project context is clear.",
         ].join(" ") }],
       },
@@ -107,7 +109,8 @@ export async function POST(request: Request) {
       typeof parsed.title !== "string" || (!parsed.title.trim() && !parsed.needsClarification) ||
       !Number.isInteger(parsed.durationMinutes) || parsed.durationMinutes < (parsed.needsClarification ? 0 : 5) || parsed.durationMinutes > 480 ||
       !validDate || !validProject ||
-      !Number.isInteger(parsed.sessionMinutes) || parsed.sessionMinutes < 25 || parsed.sessionMinutes > 60 ||
+      !Number.isInteger(parsed.sessionMinutes) || parsed.sessionMinutes < 5 || parsed.sessionMinutes > 120 ||
+      typeof parsed.splitIntoSessions !== "boolean" ||
       typeof parsed.needsClarification !== "boolean" || typeof parsed.clarification !== "string"
     ) {
       return NextResponse.json({ error: "Aevia couldn't verify the details in that request. Try rephrasing it." }, { status: 502 });
@@ -119,6 +122,7 @@ export async function POST(request: Request) {
       deadlineDate: parsed.deadlineDate,
       project: parsed.project,
       sessionMinutes: parsed.sessionMinutes,
+      splitIntoSessions: parsed.splitIntoSessions,
       needsClarification: parsed.needsClarification,
       clarification: parsed.clarification.trim().slice(0, 240),
     });

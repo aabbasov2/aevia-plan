@@ -4,7 +4,8 @@ import { weekStart } from "./time";
 import { DEFAULT_PLANNER_PREFERENCES } from "./preferences";
 
 const SLOT = 10;
-const MAX_FOCUS_BLOCK_MINUTES = 60;
+const MAX_FOCUS_BLOCK_MINUTES = 120;
+const MIN_FOCUS_BLOCK_MINUTES = 45;
 
 export type PlanRun = {
   scheduledTaskCount: number;
@@ -43,8 +44,6 @@ export function buildPlan(
   }));
   const blocks: PlannedBlock[] = [];
   const unscheduled: string[] = [];
-  let nextTaskAllowedAt: Date | null = null;
-
   const scheduledByTask = new Map<string, number>();
   for (const event of events) {
     if (!event.cancelled && event.taskId && new Date(event.start) >= now) {
@@ -87,71 +86,44 @@ export function buildPlan(
         ? statedDeadline
         : fallbackDeadline;
 
-    let currentBlock: PlannedBlock | null = null;
-    for (let day = 0; day < 5 && remaining > 0; day += 1) {
-      for (
-        let minutes = preferences.workStartMinutes;
-        minutes < preferences.workEndMinutes && remaining > 0;
-        minutes += SLOT
-      ) {
-        const slotStart = addMinutes(startOfDay(addDays(ws, day)), minutes);
-        const slotEnd = addMinutes(slotStart, SLOT);
+    const savedSessionPreference = task.splitPreference ? task.focusBlockMinutes : undefined;
+    const requestedSession = Math.min(remaining, savedSessionPreference ?? remaining, MAX_FOCUS_BLOCK_MINUTES);
+    const maximumSession = Math.max(Math.min(remaining, MIN_FOCUS_BLOCK_MINUTES), requestedSession);
+    while (remaining > 0) {
+      let sessionCount = Math.ceil(remaining / maximumSession);
+      if (sessionCount > 1 && remaining / sessionCount < MIN_FOCUS_BLOCK_MINUTES) sessionCount -= 1;
+      const sessionMinutes = sessionCount > 1
+        ? Math.ceil((remaining / sessionCount) / SLOT) * SLOT
+        : remaining;
+      const requiredMinutes = Math.min(remaining, sessionMinutes);
+      let placed: Date | null = null;
 
-        if (currentBlock && currentBlock.durationMinutes >= (task.focusBlockMinutes ?? MAX_FOCUS_BLOCK_MINUTES)) {
-          currentBlock = flushBlock(currentBlock, blocks);
-          nextTaskAllowedAt = addMinutes(slotStart, preferences.bufferMinutes);
+      for (let day = 0; day < 5 && !placed; day += 1) {
+        const dayStart = startOfDay(addDays(ws, day));
+        const earliest = isCurrentWeek && day === now.getDay() - 1
+          ? Math.max(preferences.workStartMinutes, now.getHours() * 60 + now.getMinutes())
+          : preferences.workStartMinutes;
+        for (let minute = Math.ceil(earliest / SLOT) * SLOT; minute + requiredMinutes <= preferences.workEndMinutes; minute += SLOT) {
+          const slotStart = addMinutes(dayStart, minute);
+          const slotEnd = addMinutes(slotStart, requiredMinutes);
+          if (isBefore(schedulingDeadline, slotEnd) || overlaps(slotStart, slotEnd, occupied)) continue;
+          placed = slotStart;
+          break;
         }
-
-        if (
-          (isCurrentWeek && isBefore(slotStart, now)) ||
-          (nextTaskAllowedAt && isBefore(slotStart, nextTaskAllowedAt)) ||
-          isBefore(schedulingDeadline, slotEnd) ||
-          overlaps(slotStart, slotEnd, occupied)
-        ) {
-          currentBlock = flushBlock(currentBlock, blocks);
-          continue;
-        }
-
-        const duration = Math.min(SLOT, remaining);
-        if (
-          currentBlock &&
-          new Date(currentBlock.start).getTime() + currentBlock.durationMinutes * 60_000 === slotStart.getTime()
-        ) {
-          currentBlock.durationMinutes += duration;
-        } else {
-          currentBlock = flushBlock(currentBlock, blocks);
-          currentBlock = { task, start: slotStart.toISOString(), durationMinutes: duration };
-        }
-
-        occupied.push({
-          start: slotStart,
-          // Keep adjacent slots available while a focus block is being built.
-          // The recovery buffer is enforced by nextTaskAllowedAt once the
-          // complete block is flushed; applying it to every 10-minute slot
-          // makes the task collide with itself.
-          end: addMinutes(slotStart, duration),
-        });
-        remaining -= duration;
       }
-    }
-    currentBlock = flushBlock(currentBlock, blocks);
-    const taskBlocks = blocks.filter((block) => block.task.id === task.id);
-    if (taskBlocks.length > 0) {
-      const lastBlock = taskBlocks[taskBlocks.length - 1];
-      nextTaskAllowedAt = addMinutes(
-        new Date(lastBlock.start),
-        lastBlock.durationMinutes + preferences.bufferMinutes
-      );
+
+      if (!placed) break;
+      blocks.push({ task, start: placed.toISOString(), durationMinutes: requiredMinutes });
+      occupied.push({
+        start: addMinutes(placed, -preferences.bufferMinutes),
+        end: addMinutes(placed, requiredMinutes + preferences.bufferMinutes),
+      });
+      remaining -= requiredMinutes;
     }
     if (remaining > 0) unscheduled.push(task.id);
   }
 
   return { blocks, unscheduled };
-}
-
-function flushBlock(block: PlannedBlock | null, blocks: PlannedBlock[]) {
-  if (block) blocks.push(block);
-  return null;
 }
 
 export function overlaps(
@@ -162,4 +134,4 @@ export function overlaps(
   return intervals.some((interval) => start < interval.end && end > interval.start);
 }
 
-export { MAX_FOCUS_BLOCK_MINUTES };
+export { MAX_FOCUS_BLOCK_MINUTES, MIN_FOCUS_BLOCK_MINUTES };

@@ -19,6 +19,7 @@ type Workspace = {
   focusHistory: unknown[];
   capturedDistractions: unknown[];
   inboxItems: unknown[];
+  assistantMessages: Array<{ id: string; role: "user" | "assistant"; content: string; createdAt: number }>;
 };
 type LoadResult = { revision: number | string; has_workspace: boolean; state: Workspace | null };
 type Phase = "loading" | "ready" | "import" | "error";
@@ -90,6 +91,7 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
         sessionId: thought.sessionId && focusSessionIds.has(thought.sessionId) ? thought.sessionId : undefined,
       })),
       inboxItems: state.inboxItems,
+      assistantMessages: state.assistantMessages,
     };
     setSyncError("");
     try {
@@ -99,6 +101,19 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
         throw result.error;
       }
       revision.current = Number(result.data);
+      if (state.assistantMessages.length) {
+        const chatSave = await createClient().from("assistant_messages").upsert(
+          state.assistantMessages.map((message) => ({
+            user_id: currentUserId.current,
+            id: message.id,
+            role: message.role,
+            content: message.content,
+            created_at: new Date(message.createdAt).toISOString(),
+          })),
+          { onConflict: "user_id,id" },
+        );
+        if (chatSave.error && chatSave.error.code !== "42P01" && chatSave.error.code !== "PGRST205") throw chatSave.error;
+      }
       localStorage.setItem(LAST_ACCOUNT_KEY, currentUserId.current);
       if (!pending.current) localStorage.removeItem(pendingAccountKey(currentUserId.current));
       setLastSavedAt(Date.now());
@@ -143,6 +158,22 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
       throw error;
     }
     const loaded = data as LoadResult;
+    if (loaded.state) {
+      const { data: messages, error: messagesError } = await createClient()
+        .from("assistant_messages")
+        .select("id, role, content, created_at")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      const cloudMessages = messagesError ? [] : [...(messages ?? [])].reverse().map((message) => ({
+        id: message.id,
+        role: message.role as "user" | "assistant",
+        content: message.content,
+        createdAt: new Date(message.created_at).getTime(),
+      }));
+      loaded.state.assistantMessages = Array.from(new Map([...local.assistantMessages, ...cloudMessages].map((message) => [message.id, message])).values())
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .slice(-100);
+    }
     revision.current = Number(loaded.revision ?? 0);
 
     const pendingLocalChanges = localStorage.getItem(pendingAccountKey(userId)) === "true";
@@ -272,16 +303,16 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
 }
 
 function emptyWorkspace(): Workspace {
-  return { tasks: [], events: [], commitments: [], plannerPreferences: { ...DEFAULT_PLANNER_PREFERENCES, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }, todayBackground: "mountains", focusSession: null, focusHistory: [], capturedDistractions: [], inboxItems: [] };
+  return { tasks: [], events: [], commitments: [], plannerPreferences: { ...DEFAULT_PLANNER_PREFERENCES, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }, todayBackground: "mountains", focusSession: null, focusHistory: [], capturedDistractions: [], inboxItems: [], assistantMessages: [] };
 }
 
 function snapshotLocalWorkspace(): Workspace {
   const state = useStore.getState();
-  return { tasks: state.tasks, events: state.events, commitments: state.commitments, plannerPreferences: state.plannerPreferences, todayBackground: state.todayBackground, focusSession: state.focusSession, focusHistory: state.focusHistory, capturedDistractions: state.capturedDistractions, inboxItems: state.inboxItems };
+  return { tasks: state.tasks, events: state.events, commitments: state.commitments, plannerPreferences: state.plannerPreferences, todayBackground: state.todayBackground, focusSession: state.focusSession, focusHistory: state.focusHistory, capturedDistractions: state.capturedDistractions, inboxItems: state.inboxItems, assistantMessages: state.assistantMessages };
 }
 
 function hasLocalData(state: Workspace) {
-  return state.tasks.length > 0 || state.events.length > 0 || state.commitments.length > 0 || state.capturedDistractions.length > 0 || state.focusHistory.length > 0 || state.focusSession !== null || state.inboxItems.length > 0 || state.todayBackground !== "mountains" || JSON.stringify(state.plannerPreferences) !== JSON.stringify(DEFAULT_PLANNER_PREFERENCES);
+  return state.tasks.length > 0 || state.events.length > 0 || state.commitments.length > 0 || state.capturedDistractions.length > 0 || state.focusHistory.length > 0 || state.focusSession !== null || state.inboxItems.length > 0 || state.assistantMessages.length > 0 || state.todayBackground !== "mountains" || JSON.stringify(state.plannerPreferences) !== JSON.stringify(DEFAULT_PLANNER_PREFERENCES);
 }
 
 function mergeWorkspaces(cloud: Workspace, local: Workspace): Workspace {
@@ -294,6 +325,7 @@ function mergeWorkspaces(cloud: Workspace, local: Workspace): Workspace {
     focusHistory: mergeById(cloud.focusHistory as Array<{ id: string }>, local.focusHistory as Array<{ id: string }>),
     capturedDistractions: mergeById(cloud.capturedDistractions as Array<{ id: string }>, local.capturedDistractions as Array<{ id: string }>),
     inboxItems: mergeById(cloud.inboxItems as Array<{ id: string }>, local.inboxItems as Array<{ id: string }>),
+    assistantMessages: mergeById(cloud.assistantMessages, local.assistantMessages),
     focusSession: cloud.focusSession ?? local.focusSession,
   };
 }
@@ -305,6 +337,7 @@ function applyWorkspace(workspace: Workspace) {
     plannerPreferences: plannerPreferences as never, todayBackground: workspace.todayBackground as never,
     focusSession: workspace.focusSession as never, focusHistory: workspace.focusHistory as never[],
     capturedDistractions: workspace.capturedDistractions as never[], inboxItems: workspace.inboxItems as never[],
+    assistantMessages: workspace.assistantMessages as never[],
     recoveryUndoEvents: null,
   });
 }

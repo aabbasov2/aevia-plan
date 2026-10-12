@@ -1,7 +1,7 @@
 "use client";
 
-import { AeviaPanel } from "@/components/aevia/AeviaPanel";
 import { PlanHealthCard } from "@/components/aevia/PlanHealthCard";
+import { TodayCommandPanel } from "@/components/aevia/TodayCommandPanel";
 import { AeviaArc } from "@/components/brand/AeviaArc";
 
 export default function AeviaPage() {
@@ -19,7 +19,7 @@ export default function AeviaPage() {
       </div>
 
       <div className="mt-14 grid grid-cols-2 gap-4">
-        <AeviaPanel variant="hero" />
+        <TodayCommandPanel />
         <PlanHealthCard />
       </div>
 
@@ -31,8 +31,8 @@ export default function AeviaPage() {
             body="A to-do list ignores time. Aevia respects it."
           />
           <Principle
-            title="Not a chatbot"
-            body="Aevia works in the background — it plans, it doesn't chat."
+            title="A planning partner"
+            body="Talk through your schedule, then review a realistic plan before it changes."
           />
           <Principle
             title="Built around time"
