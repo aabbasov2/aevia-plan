@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-
-const MODEL = "gemini-3.8-flash";
+import { generateGeminiContent } from "@/lib/gemini";
 
 const responseSchema = {
   type: "OBJECT",
@@ -52,30 +51,25 @@ export async function POST(request: Request) {
     : [];
 
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-      body: JSON.stringify({
-        systemInstruction: {
-          parts: [{ text: [
-            "Interpret a user's report that their day or week changed, so a calendar can be replanned.",
-            "Supported changes: a new unavailable time window, or a specific calendar meeting that ran late.",
-            "For unavailable time, return the local date, startTime, and endTime as YYYY-MM-DD and HH:mm. If the user says they are unavailable for the rest of the day, use the supplied workEndTime as endTime.",
-            "For a meeting overrun, select the matching eventId from the supplied calendar events, return its date and newEndTime, and leave startTime/endTime empty.",
-            "Never invent a meeting or guess an ambiguous time. If the change cannot be represented confidently, set kind=clarification and ask one short question.",
-            "Do not suggest or generate task schedules. The app's calendar planner will do that after validating your interpretation.",
-          ].join(" ") }],
-        },
-        contents: [{ role: "user", parts: [{ text: [
-          `Today: ${today}`,
-          `Timezone: ${timeZone}`,
-          `Workday ends: ${workEndTime}`,
-          `User report: ${body.message.trim()}`,
-          `Calendar events: ${JSON.stringify(events)}`,
-        ].join("\n") }] }],
-        generationConfig: { responseMimeType: "application/json", responseSchema, temperature: 0.1 },
-      }),
-      signal: AbortSignal.timeout(20_000),
+    const response = await generateGeminiContent(apiKey, {
+      systemInstruction: {
+        parts: [{ text: [
+          "Interpret a user's report that their day or week changed, so a calendar can be replanned.",
+          "Supported changes: a new unavailable time window, or a specific calendar meeting that ran late.",
+          "For unavailable time, return the local date, startTime, and endTime as YYYY-MM-DD and HH:mm. If the user says they are unavailable for the rest of the day, use the supplied workEndTime as endTime.",
+          "For a meeting overrun, select the matching eventId from the supplied calendar events, return its date and newEndTime, and leave startTime/endTime empty.",
+          "Never invent a meeting or guess an ambiguous time. If the change cannot be represented confidently, set kind=clarification and ask one short question.",
+          "Do not suggest or generate task schedules. The app's calendar planner will do that after validating your interpretation.",
+        ].join(" ") }],
+      },
+      contents: [{ role: "user", parts: [{ text: [
+        `Today: ${today}`,
+        `Timezone: ${timeZone}`,
+        `Workday ends: ${workEndTime}`,
+        `User report: ${body.message.trim()}`,
+        `Calendar events: ${JSON.stringify(events)}`,
+      ].join("\n") }] }],
+      generationConfig: { responseMimeType: "application/json", responseSchema, temperature: 0.1 },
     });
 
     if (!response.ok) {

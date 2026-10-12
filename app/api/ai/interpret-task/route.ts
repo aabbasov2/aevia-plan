@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
+import { generateGeminiContent } from "@/lib/gemini";
 
-const MODEL = "gemini-3.8-flash";
 const MAX_INPUT_LENGTH = 2000;
 
 const responseSchema = {
@@ -56,32 +56,24 @@ export async function POST(request: Request) {
     : "UTC";
 
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
+    const response = await generateGeminiContent(apiKey, {
+      systemInstruction: {
+        parts: [{ text: [
+          "Interpret a user's request to schedule one task in a calendar.",
+          "Extract a concise task title, total estimated effort in minutes, a deadline date, project, and a suggested focus-session length.",
+          "Use the supplied current date and IANA timezone when interpreting relative dates and dates without a year. For a date without a year, choose the next occurrence on or after today.",
+          "A date-only deadline means the end of that local calendar day. Return deadlineDate as YYYY-MM-DD, or an empty string if no deadline was provided.",
+          "Never invent an effort estimate or deadline that the user did not provide. If either is necessary to schedule and missing or unclear, set needsClarification=true and ask one concise question.",
+          "Suggested focus sessions should be between 25 and 60 minutes, with shorter sessions for draining or long tasks. Do not create semantic subtasks unless the user described them.",
+          "Use project 'work' when no project context is clear.",
+        ].join(" ") }],
       },
-      body: JSON.stringify({
-        systemInstruction: {
-          parts: [{ text: [
-            "Interpret a user's request to schedule one task in a calendar.",
-            "Extract a concise task title, total estimated effort in minutes, a deadline date, project, and a suggested focus-session length.",
-            "Use the supplied current date and IANA timezone when interpreting relative dates and dates without a year. For a date without a year, choose the next occurrence on or after today.",
-            "A date-only deadline means the end of that local calendar day. Return deadlineDate as YYYY-MM-DD, or an empty string if no deadline was provided.",
-            "Never invent an effort estimate or deadline that the user did not provide. If either is necessary to schedule and missing or unclear, set needsClarification=true and ask one concise question.",
-            "Suggested focus sessions should be between 25 and 60 minutes, with shorter sessions for draining or long tasks. Do not create semantic subtasks unless the user described them.",
-            "Use project 'work' when no project context is clear.",
-          ].join(" ") }],
-        },
-        contents: [{ role: "user", parts: [{ text: `Current date: ${today}\nTimezone: ${timeZone}\nRequest: ${body.message.trim()}` }] }],
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema,
-          temperature: 0.1,
-        },
-      }),
-      signal: AbortSignal.timeout(20_000),
+      contents: [{ role: "user", parts: [{ text: `Current date: ${today}\nTimezone: ${timeZone}\nRequest: ${body.message.trim()}` }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema,
+        temperature: 0.1,
+      },
     });
 
     if (!response.ok) {
