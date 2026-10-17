@@ -27,6 +27,10 @@ export type CapturedDistraction = {
   convertedTaskId?: string;
 };
 
+export function recordFocusSession(history: FocusSession[], session: FocusSession): FocusSession[] {
+  return [session, ...history.filter((item) => item.id !== session.id)];
+}
+
 export function remainingMilliseconds(session: FocusSession, now = Date.now()): number {
   if (session.status === "paused") return Math.max(0, session.remainingMs ?? 0);
   if (session.status !== "running" || session.targetEndAt === null) return 0;
@@ -67,9 +71,11 @@ export function resumeFocusSession(session: FocusSession, now = Date.now()): Foc
   };
 }
 
-export function completeFocusSession(session: FocusSession, now = Date.now()): FocusSession {
-  if (session.status !== "running" || remainingMilliseconds(session, now) > 0) return session;
-  const completedAt = session.targetEndAt ?? now;
+export function completeFocusSession(session: FocusSession, now = Date.now(), allowEarly = false): FocusSession {
+  if (session.status !== "running" && session.status !== "paused") return session;
+  if (!allowEarly && session.status === "running" && remainingMilliseconds(session, now) > 0) return session;
+  if (!allowEarly && session.status === "paused" && (session.remainingMs ?? 0) > 0) return session;
+  const completedAt = allowEarly ? now : (session.targetEndAt ?? now);
   return {
     ...session,
     status: "completed",

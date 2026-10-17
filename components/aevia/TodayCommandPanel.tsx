@@ -120,13 +120,16 @@ function availabilitySummary(events: CalendarEvent[], preferences: { workStartMi
   return `${label}: ${slots.slice(0, 4).map((slot) => `${format(slot.start, "EEE HH:mm")}–${format(slot.end, "HH:mm")}`).join(" · ")}${slots.length > 4 ? ` · +${slots.length - 4} more` : ""}.`;
 }
 
-export function TodayCommandPanel() {
+export function TodayCommandPanel({ onStartFocus }: { onStartFocus?: (taskId: string, durationMinutes: number, eventId: string) => void }) {
   const tasks = useStore((state) => state.tasks);
   const events = useStore((state) => state.events);
   const preferences = useStore((state) => state.plannerPreferences);
   const commitPlanPreview = useStore((state) => state.applyPlanPreview);
   const messages = useStore((state) => state.assistantMessages);
   const appendAssistantMessage = useStore((state) => state.appendAssistantMessage);
+  const markEventPromptAsked = useStore((state) => state.markEventPromptAsked);
+  const respondToEventPrompt = useStore((state) => state.respondToEventPrompt);
+  const toggleComplete = useStore((state) => state.toggleComplete);
   const [request, setRequest] = useState("");
   const [taskRequest, setTaskRequest] = useState("");
   const [taskModalOpen, setTaskModalOpen] = useState(false);
@@ -136,12 +139,49 @@ export function TodayCommandPanel() {
   const [recoveryDescription, setRecoveryDescription] = useState("");
   const [planPreview, setPlanPreview] = useState<PlanPreview | null>(null);
   const [busy, setBusy] = useState(false);
+  const [promptNow, setPromptNow] = useState(() => Date.now());
   const proactiveSuggestionKey = useRef("");
   const conversationRef = useRef<HTMLDivElement>(null);
 
   function addAssistantMessage(content: string) {
     const clean = content.trim();
     if (clean) appendAssistantMessage({ role: "assistant", content: clean });
+  }
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setPromptNow(Date.now()), 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const recentCutoff = promptNow - 12 * 60 * 60_000;
+    for (const event of events) {
+      if (event.kind !== "task" || !event.taskId || event.cancelled) continue;
+      const task = tasks.find((item) => item.id === event.taskId);
+      if (!task || task.completed) continue;
+      const start = new Date(event.start).getTime();
+      const end = start + event.durationMinutes * 60_000;
+      if (event.focusPromptAskedAt && !event.focusPromptResponse && start <= promptNow) {
+        respondToEventPrompt(event.id, "focus", "expired");
+      } else if (!event.focusPromptAskedAt && start > promptNow && start - promptNow <= 5 * 60_000) {
+        markEventPromptAsked(event.id, "focus");
+        appendAssistantMessage({ role: "assistant", content: `Your ${task.title} block starts at ${format(new Date(event.start), "HH:mm")}. Would you like to start focus mode?` });
+      }
+      if (!event.completionPromptAskedAt && end <= promptNow && end > recentCutoff) {
+        markEventPromptAsked(event.id, "completion");
+        appendAssistantMessage({ role: "assistant", content: `Your ${task.title} block ended at ${format(new Date(end), "HH:mm")}. Is the task done?` });
+      }
+    }
+  }, [events, tasks, promptNow, markEventPromptAsked, respondToEventPrompt, appendAssistantMessage]);
+
+  const pendingEventPrompts: Array<{ type: "focus" | "completion"; event: CalendarEvent; task: Task }> = [];
+  for (const event of events) {
+    if (!event.taskId || event.cancelled) continue;
+    const task = tasks.find((item) => item.id === event.taskId);
+    if (!task || task.completed) continue;
+    const start = new Date(event.start).getTime();
+    if (event.focusPromptAskedAt && !event.focusPromptResponse && start > promptNow) pendingEventPrompts.push({ type: "focus", event, task });
+    if (event.completionPromptAskedAt && !event.completionPromptResponse) pendingEventPrompts.push({ type: "completion", event, task });
   }
 
   function scheduleSnapshotKey() {
@@ -332,6 +372,18 @@ export function TodayCommandPanel() {
           {messages.length === 0 && <div className="inline-flex max-w-full items-start gap-2 rounded-xl rounded-tl-sm bg-[var(--surface-2)] px-3.5 py-3 text-[12px] leading-5 text-fg-muted"><Sparkles size={14} className="mt-0.5 shrink-0 text-gold" />What would you like help with?</div>}
           {messages.map((message) => <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
             <div className={`max-w-[92%] whitespace-pre-wrap rounded-xl px-3.5 py-3 text-[12px] leading-5 ${message.role === "user" ? "rounded-tr-sm bg-[var(--gold-soft)] text-fg" : "rounded-tl-sm bg-[var(--surface-2)] text-fg-muted"}`}>{message.role === "assistant" && <Sparkles size={13} className="mr-1.5 inline text-gold" />}{message.content}</div>
+          </div>)}
+          {pendingEventPrompts.map(({ type, event, task }) => <div key={`${type}-${event.id}`} className="max-w-[92%] rounded-xl rounded-tl-sm border border-[var(--gold)]/25 bg-[var(--surface-2)] px-3.5 py-3 text-[12px] leading-5 text-fg">
+            <div className="flex items-start gap-2"><Sparkles size={13} className="mt-1 shrink-0 text-gold" /><p>{type === "focus" ? `Focus block · ${task.title} at ${format(new Date(event.start), "HH:mm")}` : `${task.title} block ended at ${format(new Date(new Date(event.start).getTime() + event.durationMinutes * 60_000), "HH:mm")}`}</p></div>
+            <div className="mt-2 flex flex-wrap gap-2 pl-5">
+              {type === "focus" ? <>
+                <button type="button" className="btn btn-gold h-7 px-2.5 text-[10px]" onClick={() => { respondToEventPrompt(event.id, "focus", "started"); onStartFocus?.(task.id, event.durationMinutes, event.id); }}>Start focus</button>
+                <button type="button" className="btn h-7 px-2.5 text-[10px]" onClick={() => respondToEventPrompt(event.id, "focus", "skipped")}>Not now</button>
+              </> : <>
+                <button type="button" className="btn btn-gold h-7 px-2.5 text-[10px]" onClick={() => { respondToEventPrompt(event.id, "completion", "done"); toggleComplete(task.id); }}>Yes, mark done</button>
+                <button type="button" className="btn h-7 px-2.5 text-[10px]" onClick={() => respondToEventPrompt(event.id, "completion", "not_done")}>Not yet</button>
+              </>}
+            </div>
           </div>)}
           {busy && <div className="flex justify-start"><div className="rounded-xl rounded-tl-sm bg-[var(--surface-2)] px-3.5 py-3 text-[11px] text-fg-subtle"><span className="mr-2 inline-block h-2 w-2 animate-pulse rounded-full bg-gold" />Thinking…</div></div>}
         </div>

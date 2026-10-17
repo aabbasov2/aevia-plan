@@ -6,6 +6,7 @@ import { AlertTriangle, CheckCircle2, Cloud, LoaderCircle, RefreshCw } from "luc
 import { DEFAULT_PLANNER_PREFERENCES } from "@/lib/preferences";
 import { hasLegacyStoreData, hasScopedStoreData, preserveLegacyStoreForAccount, setStoreAccountScope, useStore } from "@/lib/store";
 import { createClient } from "@/lib/supabase/client";
+import type { FocusArtifactStyle } from "@/lib/types";
 
 const LAST_ACCOUNT_KEY = "aevia-last-synced-account";
 const pendingAccountKey = (userId: string) => `aevia-pending-sync:${userId}`;
@@ -17,6 +18,7 @@ type Workspace = {
   todayBackground: string;
   focusSession: unknown | null;
   focusHistory: unknown[];
+  focusArtifact: FocusArtifactStyle;
   capturedDistractions: unknown[];
   inboxItems: unknown[];
   assistantMessages: Array<{ id: string; role: "user" | "assistant"; content: string; createdAt: number }>;
@@ -86,6 +88,7 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
       todayBackground: state.todayBackground,
       focusSession: cleanSessionTask(state.focusSession),
       focusHistory: state.focusHistory.map((session) => cleanSessionTask(session)!),
+      focusArtifact: state.focusArtifact,
       capturedDistractions: state.capturedDistractions.map((thought) => ({
         ...thought,
         sessionId: thought.sessionId && focusSessionIds.has(thought.sessionId) ? thought.sessionId : undefined,
@@ -303,16 +306,16 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
 }
 
 function emptyWorkspace(): Workspace {
-  return { tasks: [], events: [], commitments: [], plannerPreferences: { ...DEFAULT_PLANNER_PREFERENCES, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }, todayBackground: "mountains", focusSession: null, focusHistory: [], capturedDistractions: [], inboxItems: [], assistantMessages: [] };
+  return { tasks: [], events: [], commitments: [], plannerPreferences: { ...DEFAULT_PLANNER_PREFERENCES, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }, todayBackground: "mountains", focusSession: null, focusHistory: [], focusArtifact: "arc", capturedDistractions: [], inboxItems: [], assistantMessages: [] };
 }
 
 function snapshotLocalWorkspace(): Workspace {
   const state = useStore.getState();
-  return { tasks: state.tasks, events: state.events, commitments: state.commitments, plannerPreferences: state.plannerPreferences, todayBackground: state.todayBackground, focusSession: state.focusSession, focusHistory: state.focusHistory, capturedDistractions: state.capturedDistractions, inboxItems: state.inboxItems, assistantMessages: state.assistantMessages };
+  return { tasks: state.tasks, events: state.events, commitments: state.commitments, plannerPreferences: state.plannerPreferences, todayBackground: state.todayBackground, focusSession: state.focusSession, focusHistory: state.focusHistory, focusArtifact: state.focusArtifact, capturedDistractions: state.capturedDistractions, inboxItems: state.inboxItems, assistantMessages: state.assistantMessages };
 }
 
 function hasLocalData(state: Workspace) {
-  return state.tasks.length > 0 || state.events.length > 0 || state.commitments.length > 0 || state.capturedDistractions.length > 0 || state.focusHistory.length > 0 || state.focusSession !== null || state.inboxItems.length > 0 || state.assistantMessages.length > 0 || state.todayBackground !== "mountains" || JSON.stringify(state.plannerPreferences) !== JSON.stringify(DEFAULT_PLANNER_PREFERENCES);
+  return state.tasks.length > 0 || state.events.length > 0 || state.commitments.length > 0 || state.capturedDistractions.length > 0 || state.focusHistory.length > 0 || state.focusSession !== null || state.inboxItems.length > 0 || state.assistantMessages.length > 0 || state.todayBackground !== "mountains" || state.focusArtifact !== "arc" || JSON.stringify(state.plannerPreferences) !== JSON.stringify(DEFAULT_PLANNER_PREFERENCES);
 }
 
 function mergeWorkspaces(cloud: Workspace, local: Workspace): Workspace {
@@ -323,6 +326,7 @@ function mergeWorkspaces(cloud: Workspace, local: Workspace): Workspace {
     events: mergeById(cloud.events as Array<{ id: string }>, local.events as Array<{ id: string }>),
     commitments: mergeById(cloud.commitments as Array<{ id: string }>, local.commitments as Array<{ id: string }>),
     focusHistory: mergeById(cloud.focusHistory as Array<{ id: string }>, local.focusHistory as Array<{ id: string }>),
+    focusArtifact: cloud.focusArtifact ?? local.focusArtifact ?? "arc",
     capturedDistractions: mergeById(cloud.capturedDistractions as Array<{ id: string }>, local.capturedDistractions as Array<{ id: string }>),
     inboxItems: mergeById(cloud.inboxItems as Array<{ id: string }>, local.inboxItems as Array<{ id: string }>),
     assistantMessages: mergeById(cloud.assistantMessages, local.assistantMessages),
@@ -336,6 +340,7 @@ function applyWorkspace(workspace: Workspace) {
     tasks: workspace.tasks as never[], events: workspace.events as never[], commitments: workspace.commitments as never[],
     plannerPreferences: plannerPreferences as never, todayBackground: workspace.todayBackground as never,
     focusSession: workspace.focusSession as never, focusHistory: workspace.focusHistory as never[],
+    focusArtifact: workspace.focusArtifact ?? "arc",
     capturedDistractions: workspace.capturedDistractions as never[], inboxItems: workspace.inboxItems as never[],
     assistantMessages: workspace.assistantMessages as never[],
     recoveryUndoEvents: null,

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { projectList } from "@/lib/projects";
-import type { ProjectKey, Recurrence } from "@/lib/types";
+import type { ProjectKey, Recurrence, Task } from "@/lib/types";
 import { cn } from "@/lib/cn";
 
 const DURATIONS = [
@@ -27,16 +27,19 @@ export function CreateTaskModal({
   open,
   onOpenChange,
   onCreated,
+  task,
   initialRequest,
   deferScheduling = false,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onCreated?: (taskId: string) => void;
+  task?: Task;
   initialRequest?: string;
   deferScheduling?: boolean;
 }) {
   const createTask = useStore((s) => s.createTask);
+  const updateTask = useStore((s) => s.updateTask);
   const scheduleTaskAt = useStore((s) => s.scheduleTaskAt);
   const [title, setTitle] = useState("");
   const [duration, setDuration] = useState(60);
@@ -54,16 +57,51 @@ export function CreateTaskModal({
   const [splitIntoSessions, setSplitIntoSessions] = useState(false);
 
   useEffect(() => {
-    if (open && initialRequest) {
+    if (!open) return;
+    if (task) {
+      setTitle(task.title);
+      setDuration(task.durationMinutes);
+      setDeadline(task.deadline ? toLocalDateTime(task.deadline) : "");
+      setScheduleAt("");
+      setProject(task.project);
+      setRecurrence(task.recurrence.kind);
+      setNotes(task.notes ?? "");
+      setMode("manual");
+      setRequest("");
+      setAiError(null);
+      setAiClarification(null);
+      setFocusBlockMinutes(task.focusBlockMinutes ?? 120);
+      setSplitIntoSessions(Boolean(task.splitPreference));
+    } else if (initialRequest) {
       setMode("ai");
       setRequest(initialRequest);
+    } else {
+      reset();
     }
-  }, [initialRequest, open]);
+  // Seed the form when opened or when the selected task changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialRequest, open, task?.id]);
 
   if (!open) return null;
 
   function submit() {
     if (!title.trim()) return;
+    if (task) {
+      updateTask(task.id, {
+        title: title.trim(),
+        durationMinutes: duration,
+        focusBlockMinutes,
+        splitPreference: splitIntoSessions,
+        deadline: deadline ? new Date(deadline).toISOString() : undefined,
+        recurrence: { kind: recurrence } as Recurrence,
+        project,
+        notes: notes.trim() || undefined,
+        colorIndex: colorForProject(project),
+      });
+      reset();
+      onOpenChange(false);
+      return;
+    }
     const taskId = createTask({
       title: title.trim(),
       durationMinutes: duration,
@@ -142,7 +180,7 @@ export function CreateTaskModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-5 flex items-center justify-between">
-          <h2 className="h2 text-fg">{mode === "ai" ? "Tell Aevia what needs doing" : "Review your task"}</h2>
+          <h2 className="h2 text-fg">{task ? "Edit task" : mode === "ai" ? "Tell Aevia what needs doing" : "Review your task"}</h2>
           <button className="btn-ghost btn h-8 w-8 p-0" onClick={() => onOpenChange(false)}>
             <X size={14} />
           </button>
@@ -238,14 +276,14 @@ export function CreateTaskModal({
             </Field>
           </div>
 
-          <Field label="Schedule at (optional)">
+          {!task && <Field label="Schedule at (optional)">
             <input
               type="datetime-local"
               className="input"
               value={scheduleAt}
               onChange={(e) => setScheduleAt(e.target.value)}
             />
-          </Field>
+          </Field>}
 
           <Field label="Repeat">
             <div className="flex flex-wrap gap-1.5">
@@ -294,7 +332,7 @@ export function CreateTaskModal({
             </button>
           ) : (
             <button className="btn btn-gold" onClick={submit}>
-              Schedule task
+              {task ? "Save changes" : "Schedule task"}
             </button>
           )}
         </div>
@@ -312,6 +350,13 @@ function colorForProject(p: ProjectKey): number {
     aevia: 5,
   };
   return map[p];
+}
+
+function toLocalDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

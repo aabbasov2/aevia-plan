@@ -9,6 +9,7 @@ import { TodayTimeline } from "@/components/today/TodayTimeline";
 import { TodayTasksPanel } from "@/components/today/TodayTasksPanel";
 import { TodayCommandPanel } from "@/components/aevia/TodayCommandPanel";
 import { FocusWidget } from "@/components/today/FocusWidget";
+import { FocusProgressCard } from "@/components/today/FocusArtifact";
 import { CreateTaskModal } from "@/components/tasks/CreateTaskModal";
 import { CreateEventModal } from "@/components/calendar/CreateEventModal";
 import { useProfile } from "@/components/shell/ProfileProvider";
@@ -27,6 +28,9 @@ export default function TodayPage() {
   const events = useStore((state) => state.events);
   const preferences = useStore((state) => state.plannerPreferences);
   const todayBackground = useStore((state) => state.todayBackground);
+  const focusModeOpen = useStore((state) => state.focusModeOpen);
+  const focusSession = useStore((state) => state.focusSession);
+  const focusHistory = useStore((state) => state.focusHistory);
   const setTodayBackground = useStore((state) => state.setTodayBackground);
   const [now, setNow] = useState<Date | null>(null);
   const [createTaskOpen, setCreateTaskOpen] = useState(false);
@@ -35,6 +39,7 @@ export default function TodayPage() {
   const [newMenuOpen, setNewMenuOpen] = useState(false);
   const [sceneMenuOpen, setSceneMenuOpen] = useState(false);
   const [focusTaskRequest, setFocusTaskRequest] = useState<string | undefined>();
+  const [focusStartRequest, setFocusStartRequest] = useState<{ taskId: string; durationMinutes: number; requestId: string } | undefined>();
 
   useEffect(() => {
     setNow(new Date());
@@ -50,8 +55,11 @@ export default function TodayPage() {
     });
     const taskIds = new Set(todaysEvents.map((event) => event.taskId).filter((id): id is string => Boolean(id)));
     const dueToday = tasks.filter((task) => task.deadline && new Date(task.deadline).toDateString() === now.toDateString());
-    const dayTasks = Array.from(new Map([...dueToday, ...tasks.filter((task) => taskIds.has(task.id))].map((task) => [task.id, task])).values());
-    const upcoming = todaysEvents.find((event) => new Date(event.start).getTime() + event.durationMinutes * 60_000 > now.getTime());
+    const completedToday = tasks.filter((task) => task.completedAt && new Date(task.completedAt).toDateString() === now.toDateString());
+    const dayTasks = Array.from(new Map([...dueToday, ...completedToday, ...tasks.filter((task) => taskIds.has(task.id))].map((task) => [task.id, task])).values());
+    const upcoming = todaysEvents
+      .filter((event) => new Date(event.start).getTime() >= now.getTime())
+      .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())[0] ?? null;
     const workMinutes = todaysEvents.filter((event) => event.kind === "task").reduce((sum, event) => sum + event.durationMinutes, 0);
     const completed = dayTasks.filter((task) => task.completed).length;
     return { todaysEvents, dayTasks, upcoming, workMinutes, completed };
@@ -112,8 +120,11 @@ export default function TodayPage() {
           <TodayTasksPanel onFocusTask={(taskId) => { setFocusTaskRequest(taskId); document.getElementById("today-focus")?.scrollIntoView({ behavior: "smooth", block: "center" }); }} />
         </div>
         <div className="flex min-w-0 flex-col gap-4">
-          <TodayCommandPanel />
-          <FocusWidget requestedTaskId={focusTaskRequest} />
+          <TodayCommandPanel onStartFocus={(taskId, durationMinutes, eventId) => {
+            setFocusTaskRequest(taskId);
+            setFocusStartRequest({ taskId, durationMinutes, requestId: `${eventId}-${Date.now()}` });
+          }} />
+          {!focusModeOpen && <><FocusWidget requestedTaskId={focusTaskRequest} startRequest={focusStartRequest} onStartRequestHandled={(requestId) => setFocusStartRequest((request) => request?.requestId === requestId ? undefined : request)} /><FocusProgressCard sessions={focusSession ? [...focusHistory, focusSession] : focusHistory} tasks={tasks} /></>}
         </div>
       </div>
     </div>

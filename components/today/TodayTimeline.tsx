@@ -78,6 +78,7 @@ export function TodayTimeline({
   const [view, setView] = useState<CalendarView>("day");
   const events = useStore((s) => s.events);
   const focusSession = useStore((s) => s.focusSession);
+  const setFocusModeOpen = useStore((s) => s.setFocusModeOpen);
   const viewingToday = isSameDay(selectedDate, now);
 
   useEffect(() => {
@@ -151,11 +152,11 @@ export function TodayTimeline({
         </div>
       </div>
 
-      {viewingToday && focusSession?.kind === "focus" && focusSession.status === "running" && <div className="flex items-center gap-2.5 border-b border-[var(--border)] bg-[var(--gold-soft)]/35 px-5 py-2.5 text-[10px] sm:px-6">
+      {viewingToday && focusSession?.kind === "focus" && (focusSession.status === "running" || focusSession.status === "paused") && <div className="flex items-center gap-2.5 border-b border-[var(--border)] bg-[var(--gold-soft)]/35 px-5 py-2.5 text-[10px] sm:px-6">
         <Focus size={13} className="shrink-0 text-gold" />
         <span className="min-w-0 flex-1 truncate text-fg">Focus underway{focusSession.taskTitle ? ` · ${focusSession.taskTitle}` : " · open session"}</span>
         <span className="shrink-0 tabular-nums text-fg-muted">{Math.floor(remainingMilliseconds(focusSession, now.getTime()) / 60_000)}m left</span>
-        <button type="button" className="shrink-0 text-gold underline-offset-2 hover:underline" onClick={() => document.getElementById("today-focus")?.scrollIntoView({ behavior: "smooth", block: "center" })}>Open Focus</button>
+        <button type="button" className="shrink-0 text-gold underline-offset-2 hover:underline" onClick={() => setFocusModeOpen(true)}>{focusSession.status === "paused" ? "Return to Focus" : "Open Focus"}</button>
       </div>}
 
       {featuredEvent && <button type="button" onClick={() => setSelectedEventId(featuredEvent.id)} className="flex w-full items-center gap-3 border-b border-[var(--border)] bg-[var(--surface-2)]/45 px-5 py-3 text-left transition hover:bg-[var(--surface-2)] sm:px-6">

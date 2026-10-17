@@ -2,6 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes focus-enter { from { opacity: 0; } to { opacity: 1; } }
+@keyframes arc-draw { from { stroke-dasharray: 1500; stroke-dashoffset: 1500; } to { stroke-dasharray: 1500; stroke-dashoffset: 0; } }
+.arc-session-path { animation: arc-draw 1.25s cubic-bezier(.22,.61,.36,1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+}
+
 :root {
   --bg: #0b0b0d;
   --surface: #111114;

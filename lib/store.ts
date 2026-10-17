@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import { addDays } from "date-fns";
-import type { AssistantMessage, CalendarEvent, Commitment, InboxItem, PlannerPreferences, Task } from "./types";
+import type { AssistantMessage, CalendarEvent, Commitment, FocusArtifactStyle, InboxItem, PlannerPreferences, Task } from "./types";
 import { weekStart } from "./time";
 import { buildPlan, MAX_FOCUS_BLOCK_MINUTES, planningWeekStart } from "./planner";
 import { DEFAULT_PLANNER_PREFERENCES } from "./preferences";
@@ -14,6 +14,7 @@ import {
   pauseFocusSession,
   remainingMilliseconds,
   resumeFocusSession,
+  recordFocusSession,
   type CapturedDistraction,
   type FocusSession,
   type FocusSessionKind,
@@ -79,6 +80,10 @@ type State = {
   setTodayBackground: (scene: TodayBackground) => void;
   focusSession: FocusSession | null;
   focusHistory: FocusSession[];
+  focusArtifact: FocusArtifactStyle;
+  setFocusArtifact: (style: FocusArtifactStyle) => void;
+  focusModeOpen: boolean;
+  setFocusModeOpen: (open: boolean) => void;
   capturedDistractions: CapturedDistraction[];
   inboxItems: InboxItem[];
   assistantMessages: AssistantMessage[];
@@ -87,6 +92,7 @@ type State = {
   pauseFocus: () => void;
   resumeFocus: () => void;
   completeFocus: () => void;
+  finishFocus: () => void;
   endFocus: () => void;
   captureDistraction: (text: string, category?: CapturedDistraction["category"]) => string;
   updateDistractionStatus: (id: string, status: CapturedDistraction["status"]) => void;
@@ -111,6 +117,9 @@ type State = {
   ) => { updated: boolean; movedTask: boolean; message?: string };
   scheduleTaskAt: (taskId: string, start: string) => void;
   toggleComplete: (id: string) => void;
+  markEventPromptAsked: (eventId: string, prompt: "focus" | "completion") => void;
+  respondToEventPrompt: (eventId: string, prompt: "focus" | "completion", response: "started" | "skipped" | "expired" | "done" | "not_done") => void;
+  updateTask: (id: string, updates: Partial<Omit<Task, "id">>) => void;
   updateTaskDeadline: (id: string, deadline?: string) => void;
   removeTask: (id: string) => void;
   scheduleTask: (taskId: string, dayIndex: number, startMinutes: number, baseWeekMs?: number) => string | undefined;
@@ -149,6 +158,48 @@ function makeIsoAt(dayIndex: number, minutes: number, baseWeek = weekStart()): s
   d.setHours(0, 0, 0, 0);
   d.setMinutes(minutes);
   return d.toISOString();
+}
+
+function mergeAdjacentTaskBlocks(events: CalendarEvent[], changedEventId: string): CalendarEvent[] {
+  const originalIndex = events.findIndex((event) => event.id === changedEventId);
+  const changed = events[originalIndex];
+  if (!changed || changed.kind !== "task" || !changed.taskId || changed.cancelled) return events;
+
+  let merged = { ...changed };
+  let mergedStart = new Date(merged.start).getTime();
+  let mergedEnd = mergedStart + merged.durationMinutes * 60_000;
+  const mergedIds = new Set([changedEventId]);
+  let foundNeighbor = true;
+
+  while (foundNeighbor) {
+    foundNeighbor = false;
+    const neighbor = events.find((event) => {
+      if (mergedIds.has(event.id) || event.kind !== "task" || event.taskId !== changed.taskId || event.cancelled) return false;
+      const eventStart = new Date(event.start).getTime();
+      const eventEnd = eventStart + event.durationMinutes * 60_000;
+      return new Date(eventStart).toDateString() === new Date(mergedStart).toDateString() && eventStart <= mergedEnd && eventEnd >= mergedStart;
+    });
+    if (!neighbor) continue;
+
+    const neighborStart = new Date(neighbor.start).getTime();
+    const neighborEnd = neighborStart + neighbor.durationMinutes * 60_000;
+    mergedStart = Math.min(mergedStart, neighborStart);
+    mergedEnd = Math.max(mergedEnd, neighborEnd);
+    mergedIds.add(neighbor.id);
+    merged = {
+      ...merged,
+      start: new Date(mergedStart).toISOString(),
+      durationMinutes: Math.round((mergedEnd - mergedStart) / 60_000),
+      focusPromptAskedAt: merged.focusPromptAskedAt ?? neighbor.focusPromptAskedAt,
+      focusPromptResponse: merged.focusPromptResponse ?? neighbor.focusPromptResponse,
+      completionPromptAskedAt: merged.completionPromptAskedAt ?? neighbor.completionPromptAskedAt,
+      completionPromptResponse: merged.completionPromptResponse ?? neighbor.completionPromptResponse,
+    };
+    foundNeighbor = true;
+  }
+
+  if (mergedIds.size === 1) return events;
+  return events.flatMap((event, index) => index === originalIndex ? [merged] : mergedIds.has(event.id) ? [] : [event]);
 }
 
 function nearestAvailableLunchStart(
@@ -274,6 +325,7 @@ function migratePersistedWorkspace(savedState: Partial<State>, currentState: Sta
     commitments: migratedCommitments,
     focusSession: migratedSession,
     focusHistory: migratedHistory,
+    focusArtifact: savedState.focusArtifact ?? currentState.focusArtifact ?? "arc",
     capturedDistractions: migratedThoughts,
     inboxItems: migratedInboxItems,
     assistantMessages: savedState.assistantMessages ?? currentState.assistantMessages,
@@ -286,10 +338,6 @@ function lunchIdFor(date: Date) {
   return `00000000-0000-4000-8000-${day}0000`;
 }
 
-function recordFocusSession(history: FocusSession[], session: FocusSession) {
-  return [session, ...history.filter((item) => item.id !== session.id)].slice(0, 250);
-}
-
 export const useStore = create<State>()(persist((set, get) => ({
   tasks: [],
   events: [],
@@ -299,6 +347,10 @@ export const useStore = create<State>()(persist((set, get) => ({
   setTodayBackground: (scene) => set({ todayBackground: scene }),
   focusSession: null,
   focusHistory: [],
+  focusArtifact: "arc",
+  setFocusArtifact: (focusArtifact) => set({ focusArtifact }),
+  focusModeOpen: false,
+  setFocusModeOpen: (focusModeOpen) => set({ focusModeOpen }),
   capturedDistractions: [],
   inboxItems: [],
   assistantMessages: [],
@@ -327,6 +379,7 @@ export const useStore = create<State>()(persist((set, get) => ({
         focusedMs: 0,
       },
       focusHistory: previousHistory,
+      focusModeOpen: true,
     });
     return true;
   },
@@ -354,6 +407,11 @@ export const useStore = create<State>()(persist((set, get) => ({
     if (completed === state.focusSession) return state;
     return { focusSession: completed, focusHistory: recordFocusSession(state.focusHistory, completed) };
   }),
+  finishFocus: () => set((state) => {
+    if (!state.focusSession || (state.focusSession.status !== "running" && state.focusSession.status !== "paused")) return state;
+    const completed = completeFocusSession(state.focusSession, Date.now(), true);
+    return { focusSession: completed, focusHistory: recordFocusSession(state.focusHistory, completed) };
+  }),
   endFocus: () => set((state) => {
     if (!state.focusSession) return state;
     if (state.focusSession.status === "running" && remainingMilliseconds(state.focusSession) === 0) {
@@ -362,7 +420,7 @@ export const useStore = create<State>()(persist((set, get) => ({
     }
     const ended = endFocusSession(state.focusSession);
     if (ended === state.focusSession) return state;
-    return { focusSession: ended, focusHistory: recordFocusSession(state.focusHistory, ended) };
+    return { focusSession: ended, focusHistory: recordFocusSession(state.focusHistory, ended), focusModeOpen: false };
   }),
   captureDistraction: (text, category = "thought") => {
     const cleanText = text.trim();
@@ -786,8 +844,7 @@ export const useStore = create<State>()(persist((set, get) => ({
         return s;
       }
       result.updated = true;
-      return {
-        events: s.events
+      const updatedEvents = s.events
           .map((event) =>
             event.id === eventId
               ? {
@@ -797,8 +854,8 @@ export const useStore = create<State>()(persist((set, get) => ({
                   locked: event.taskId || event.kind === "lunch" ? true : event.locked,
                 }
               : event
-          ),
-      };
+          );
+      return { events: mergeAdjacentTaskBlocks(updatedEvents, eventId) };
     });
     return result;
   },
@@ -832,11 +889,64 @@ export const useStore = create<State>()(persist((set, get) => ({
       };
     }),
 
-  toggleComplete: (id) =>
+  toggleComplete: (id) => {
+    const task = get().tasks.find((item) => item.id === id);
+    if (!task) return;
+    const completing = !task.completed;
+    const now = Date.now();
     set((s) => ({
-      tasks: s.tasks.map((t) =>
-        t.id === id ? { ...t, completed: !t.completed } : t
+      tasks: s.tasks.map((item) =>
+        item.id === id ? { ...item, completed: completing, completedAt: completing ? new Date(now).toISOString() : undefined } : item
       ),
+      events: s.events.map((event) => {
+        if (event.taskId !== id) return event;
+        if (completing && event.completionPromptAskedAt && !event.completionPromptResponse) {
+          event = { ...event, completionPromptResponse: "done" };
+        }
+        if (!completing) {
+          if (event.cancelledByTaskCompletion) {
+            return { ...event, cancelled: false, cancelledByTaskCompletion: undefined };
+          }
+          if (event.taskCompletionOriginalDurationMinutes !== undefined) {
+            return { ...event, durationMinutes: event.taskCompletionOriginalDurationMinutes, taskCompletionOriginalDurationMinutes: undefined };
+          }
+          return event;
+        }
+        if (event.cancelled) return event;
+        const start = new Date(event.start).getTime();
+        const end = start + event.durationMinutes * 60_000;
+        if (end <= now) return event;
+        if (start >= now) return { ...event, cancelled: true, cancelledByTaskCompletion: true };
+        const elapsedMinutes = Math.floor((now - start) / 60_000);
+        if (elapsedMinutes < 1) return { ...event, cancelled: true, cancelledByTaskCompletion: true };
+        return { ...event, durationMinutes: elapsedMinutes, taskCompletionOriginalDurationMinutes: event.durationMinutes };
+      }),
+    }));
+  },
+
+  markEventPromptAsked: (eventId, prompt) =>
+    set((s) => ({
+      events: s.events.map((event) => event.id !== eventId ? event : prompt === "focus"
+        ? { ...event, focusPromptAskedAt: event.focusPromptAskedAt ?? new Date().toISOString() }
+        : { ...event, completionPromptAskedAt: event.completionPromptAskedAt ?? new Date().toISOString() }),
+    })),
+
+  respondToEventPrompt: (eventId, prompt, response) =>
+    set((s) => ({
+      events: s.events.map((event) => event.id !== eventId ? event : prompt === "focus"
+        ? { ...event, focusPromptResponse: response as "started" | "skipped" | "expired" }
+        : { ...event, completionPromptResponse: response as "done" | "not_done" }),
+    })),
+
+  updateTask: (id, updates) =>
+    set((s) => ({
+      tasks: s.tasks.map((task) => task.id === id ? { ...task, ...updates } : task),
+      events: s.events.map((event) => event.taskId === id ? {
+        ...event,
+        title: updates.title ?? event.title,
+        project: updates.project ?? event.project,
+        colorIndex: updates.colorIndex ?? event.colorIndex,
+      } : event),
     })),
 
   updateTaskDeadline: (id, deadline) =>
@@ -891,8 +1001,7 @@ export const useStore = create<State>()(persist((set, get) => ({
       const event = s.events.find((item) => item.id === eventId);
       if (!event) return s;
       const start = makeIsoAt(dayIndex, startMinutes, baseWeekMs ? new Date(baseWeekMs) : weekStart());
-      return {
-        events: s.events.map((item) =>
+      const movedEvents = s.events.map((item) =>
           item.id === eventId
             ? {
                 ...item,
@@ -901,8 +1010,8 @@ export const useStore = create<State>()(persist((set, get) => ({
                 locked: item.taskId || item.kind === "lunch" ? true : item.locked,
               }
             : item
-        ),
-      };
+        );
+      return { events: mergeAdjacentTaskBlocks(movedEvents, eventId) };
     }),
 
   unschedule: (eventId) =>
@@ -921,7 +1030,7 @@ export const useStore = create<State>()(persist((set, get) => ({
     const ids = new Set(eventIds);
     set((s) => ({
       events: s.events.map((event) =>
-        ids.has(event.id) ? { ...event, cancelled } : event
+        ids.has(event.id) ? { ...event, cancelled, cancelledByTaskCompletion: undefined } : event
       ),
     }));
   },

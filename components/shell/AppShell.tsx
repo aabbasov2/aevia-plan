@@ -5,6 +5,9 @@ import { Sidebar } from "./Sidebar";
 import { DndProvider } from "./DndProvider";
 import { ComingSoon } from "./ComingSoon";
 import { useEffect, useState, type ReactNode } from "react";
+import { FocusExperienceOverlay } from "@/components/today/FocusExperienceOverlay";
+import { useStore } from "@/lib/store";
+import { Focus } from "lucide-react";
 
 const SIDEBAR_VISIBILITY_KEY = "aevia-sidebar-hidden";
 
@@ -42,7 +45,17 @@ export function AppShell({ children }: { children: ReactNode }) {
         >
           {children}
         </main>
+        <FocusExperienceOverlay />
+        <FocusReopenButton />
       </div>
     </DndProvider>
   );
+}
+
+function FocusReopenButton() {
+  const session = useStore((state) => state.focusSession);
+  const open = useStore((state) => state.focusModeOpen);
+  const setOpen = useStore((state) => state.setFocusModeOpen);
+  if (!session || open || (session.status !== "running" && session.status !== "paused")) return null;
+  return <button type="button" onClick={() => setOpen(true)} className="fixed bottom-5 right-5 z-40 inline-flex h-11 items-center gap-2 rounded-full border border-[var(--gold)]/40 bg-[var(--surface)] px-4 text-[12px] text-fg shadow-xl hover:bg-[var(--surface-2)]"><Focus size={15} className="text-gold"/>Return to focus</button>;
 }

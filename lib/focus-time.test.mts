@@ -6,6 +6,7 @@ import {
   focusedMilliseconds,
   pauseFocusSession,
   remainingMilliseconds,
+  recordFocusSession,
   resumeFocusSession,
   type FocusSession,
 } from "./focus-time.ts";
@@ -48,6 +49,32 @@ test("completion is idempotent and records only the planned focus duration", () 
   assert.equal(done.focusedMs, 900_000);
   assert.equal(done.endedAt, 901_000);
   assert.equal(completeFocusSession(done, 1_000_000), done);
+});
+
+test("user completion records actual elapsed focus time once", () => {
+  const done = completeFocusSession(session(), 241_000, true);
+  assert.equal(done.status, "completed");
+  assert.equal(done.focusedMs, 240_000);
+  assert.equal(done.endedAt, 241_000);
+  assert.equal(completeFocusSession(done, 300_000, true), done);
+});
+
+test("user completion after a pause excludes paused time", () => {
+  const paused = pauseFocusSession(session(), 121_000);
+  const done = completeFocusSession(paused, 9_000_000, true);
+  assert.equal(done.status, "completed");
+  assert.equal(done.focusedMs, 120_000);
+  assert.equal(done.endedAt, 9_000_000);
+});
+
+test("recording a completed session is idempotent and preserves artifact history", () => {
+  const history = Array.from({ length: 260 }, (_, index) => session({ id: `old-${index}`, status: "completed" }));
+  const next = session({ id: "new-session", status: "completed" });
+  const once = recordFocusSession(history, next);
+  const twice = recordFocusSession(once, next);
+  assert.equal(once.length, 261);
+  assert.equal(twice.length, 261);
+  assert.equal(twice[0]?.id, next.id);
 });
 
 test("ending early records actual focus and excludes paused time", () => {

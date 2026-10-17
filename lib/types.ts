@@ -12,6 +12,8 @@ export type ProjectKey =
   | "aevia"
   | "travel";
 
+export type FocusArtifactStyle = "arc" | "skyline" | "terrain" | "orbit";
+
 export type Task = {
   id: string;
   title: string;
@@ -24,6 +26,7 @@ export type Task = {
   recurrence: Recurrence;
   project: ProjectKey;
   notes?: string;
+  completedAt?: string;
   /** Idempotency link when a captured thought is converted into this task. */
   sourceDistractionId?: string;
   completed?: boolean;
@@ -54,6 +57,14 @@ export type CalendarEvent = {
   locked?: boolean;
   /** cancelled events remain visible but no longer reserve planning time */
   cancelled?: boolean;
+  /** lets task completion release future time and restore it if the task is reopened */
+  cancelledByTaskCompletion?: boolean;
+  /** original duration for an in-progress event shortened when its task was completed */
+  taskCompletionOriginalDurationMinutes?: number;
+  focusPromptAskedAt?: string;
+  focusPromptResponse?: "started" | "skipped" | "expired";
+  completionPromptAskedAt?: string;
+  completionPromptResponse?: "done" | "not_done";
 };
 
 export type PlannerPreferences = {

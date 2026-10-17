@@ -17,6 +17,7 @@ export function TodayTasksPanel({ onFocusTask }: { onFocusTask?: (taskId: string
   const scheduleUnscheduledTask = useStore((s) => s.scheduleUnscheduledTask);
   const [filter, setFilter] = useState<Filter>("Today");
   const [createOpen, setCreateOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [scheduleMessages, setScheduleMessages] = useState<Record<string, string>>({});
   const now = new Date();
   const today = startOfDay(now);
@@ -27,7 +28,7 @@ export function TodayTasksPanel({ onFocusTask }: { onFocusTask?: (taskId: string
     return [...tasks].filter((task) => {
       const due = task.deadline ? new Date(task.deadline) : null;
       if (filter === "All") return true;
-      if (filter === "Today") return Boolean(scheduledToday.has(task.id) || (due && isSameDay(due, today)) || (task.completed && due && isSameDay(due, today)));
+      if (filter === "Today") return Boolean(scheduledToday.has(task.id) || (due && isSameDay(due, today)) || (task.completedAt && isSameDay(new Date(task.completedAt), today)));
       if (filter === "Upcoming") return !task.completed && Boolean((due && due > now && due < nextWeek) || events.some((event) => event.taskId === task.id && !event.cancelled && new Date(event.start) > now && new Date(event.start) < nextWeek));
       return !task.completed && (!due || due >= nextWeek) && !events.some((event) => event.taskId === task.id && !event.cancelled && new Date(event.start) < nextWeek);
     }).sort((a, b) => {
@@ -52,6 +53,7 @@ export function TodayTasksPanel({ onFocusTask }: { onFocusTask?: (taskId: string
         {visibleTasks.slice(0, 8).map((task) => <TaskRow
           key={task.id}
           task={task}
+          onEdit={() => setEditingTask(task)}
           onToggle={() => toggleComplete(task.id)}
           events={events}
           scheduleMessage={scheduleMessages[task.id]}
@@ -68,17 +70,20 @@ export function TodayTasksPanel({ onFocusTask }: { onFocusTask?: (taskId: string
       </div> : <div className="px-6 py-10 text-center"><p className="text-[14px] text-fg">Nothing in this view.</p><p className="mt-1 text-[11px] text-fg-muted">Add a task and Aevia will help find room for it.</p></div>}
     </section>
     <CreateTaskModal open={createOpen} onOpenChange={setCreateOpen} />
+    <CreateTaskModal open={Boolean(editingTask)} task={editingTask ?? undefined} onOpenChange={(open) => { if (!open) setEditingTask(null); }} />
   </>;
 }
 
-function TaskRow({ task, onToggle, events, onSchedule, onFocus, scheduleMessage }: {
+function TaskRow({ task, onToggle, events, onSchedule, onFocus, onEdit, scheduleMessage }: {
   task: Task;
   onToggle: () => void;
   events: ReturnType<typeof useStore.getState>["events"];
   onSchedule: () => void;
   onFocus: () => void;
+  onEdit: () => void;
   scheduleMessage?: string;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const sessions = events.filter((event) => event.taskId === task.id && !event.cancelled).sort((a, b) => a.start.localeCompare(b.start));
   const first = sessions[0];
   const scheduledText = first ? `${format(new Date(first.start), "EEE HH:mm")}${sessions.length > 1 ? ` · ${sessions.length} blocks` : ""}` : "Unscheduled";
@@ -99,6 +104,11 @@ function TaskRow({ task, onToggle, events, onSchedule, onFocus, scheduleMessage 
     {!first && !task.completed && <button className="btn h-7 shrink-0 px-2 text-[10px]" onClick={onSchedule} title={`Find time for ${task.title}`}><CalendarPlus size={12} /> Schedule</button>}
     {first && <span className="hidden shrink-0 text-[10px] text-fg-muted sm:inline">{scheduledText}</span>}
     {!task.completed && <button type="button" className="today-icon-button h-9 w-9 shrink-0" aria-label={`Focus on ${task.title}`} title={`Focus on ${task.title}`} onClick={onFocus}><Play size={13} /></button>}
-    <button className="today-icon-button h-9 w-9 shrink-0" aria-label={`More options for ${task.title}`} title="More options"><MoreHorizontal size={15} /></button>
+    <div className="relative shrink-0">
+      <button type="button" className="today-icon-button h-9 w-9" aria-label={`More options for ${task.title}`} title="More options" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}><MoreHorizontal size={15} /></button>
+      {menuOpen && <div role="menu" className="absolute right-0 top-full z-20 mt-1 min-w-36 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1 shadow-xl">
+        <button type="button" role="menuitem" className="w-full rounded-lg px-3 py-2 text-left text-[12px] text-fg transition hover:bg-[var(--surface-2)]" onClick={() => { setMenuOpen(false); onEdit(); }}>Edit task</button>
+      </div>}
+    </div>
   </div>;
 }

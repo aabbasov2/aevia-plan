@@ -6,15 +6,17 @@ import { useStore } from "@/lib/store";
 import { remainingMilliseconds } from "@/lib/focus-time";
 
 const PRESETS = [5, 15, 25, 45];
-const LOCK_NAME = "aevia-focus-session";
+const LOCK_NAME = "aevia-focus-session-start";
 
-export function FocusWidget({ requestedTaskId }: { requestedTaskId?: string }) {
+export function FocusWidget({ requestedTaskId, startRequest, onStartRequestHandled, immersive = false }: { requestedTaskId?: string; startRequest?: { taskId: string; durationMinutes: number; requestId: string }; onStartRequestHandled?: (requestId: string) => void; immersive?: boolean }) {
   const tasks = useStore((state) => state.tasks);
   const session = useStore((state) => state.focusSession);
+  const artifactStyle = useStore((state) => state.focusArtifact);
   const startSession = useStore((state) => state.startFocusSession);
   const pause = useStore((state) => state.pauseFocus);
   const resume = useStore((state) => state.resumeFocus);
   const complete = useStore((state) => state.completeFocus);
+  const finish = useStore((state) => state.finishFocus);
   const end = useStore((state) => state.endFocus);
   const capture = useStore((state) => state.captureDistraction);
   const openTasks = useMemo(() => tasks.filter((task) => !task.completed), [tasks]);
@@ -37,7 +39,7 @@ export function FocusWidget({ requestedTaskId }: { requestedTaskId?: string }) {
   const timerRef = useRef<HTMLDivElement>(null);
   const releaseLockRef = useRef<(() => void) | null>(null);
   const lockPendingRef = useRef<Promise<boolean> | null>(null);
-  const activeSessionId = session && (session.status === "running" || session.status === "paused") ? session.id : null;
+  const handledStartRequestRef = useRef<string | null>(null);
 
   const acquireSessionLock = useCallback((): Promise<boolean> => {
     if (typeof navigator === "undefined" || !navigator.locks) return Promise.resolve(true);
@@ -74,27 +76,11 @@ export function FocusWidget({ requestedTaskId }: { requestedTaskId?: string }) {
 
   useEffect(() => {
     const syncFromAnotherTab = (event: StorageEvent) => {
-      if (event.key === "aevia-plan-store") void Promise.resolve(useStore.persist.rehydrate()).catch(() => setSessionError("This tab couldn't sync the saved focus session."));
+      if (event.key === "aevia-plan-store" || event.key?.startsWith("aevia-plan-store:")) void Promise.resolve(useStore.persist.rehydrate()).catch(() => setSessionError("This tab couldn't sync the saved focus session."));
     };
     window.addEventListener("storage", syncFromAnotherTab);
     return () => window.removeEventListener("storage", syncFromAnotherTab);
   }, []);
-
-  useEffect(() => {
-    if (!activeSessionId) return;
-    let alive = true;
-    void acquireSessionLock().then((acquired) => {
-      if (!alive) {
-        if (acquired) releaseSessionLock();
-        return;
-      }
-      setLockWarning(!acquired);
-    });
-    return () => {
-      alive = false;
-      releaseSessionLock();
-    };
-  }, [activeSessionId, acquireSessionLock, releaseSessionLock]);
 
   useEffect(() => {
     if (!session || session.status !== "running") return;
@@ -119,6 +105,13 @@ export function FocusWidget({ requestedTaskId }: { requestedTaskId?: string }) {
     return () => window.clearTimeout(timeout);
   }, [notice]);
 
+  useEffect(() => {
+    if (!immersive) return;
+    const closeCapture = () => setCaptureOpen(false);
+    window.addEventListener("aevia:focus-capture-close", closeCapture);
+    return () => window.removeEventListener("aevia:focus-capture-close", closeCapture);
+  }, [immersive]);
+
   const currentTask = session?.taskId ? tasks.find((task) => task.id === session.taskId) : undefined;
   const selectedTask = openTasks.find((task) => task.id === selectedTaskId);
   const active = session?.status === "running" || session?.status === "paused";
@@ -133,26 +126,42 @@ export function FocusWidget({ requestedTaskId }: { requestedTaskId?: string }) {
   const timerLabel = `${String(min).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
   const circumference = 2 * Math.PI * 48;
 
-  async function beginSession(kind: "focus" | "break" = "focus", minutes = (isCustom ? customDuration : duration)) {
+  async function beginSession(kind: "focus" | "break" = "focus", minutes = (isCustom ? customDuration : duration), taskId = selectedTask?.id) {
     setSessionError(null);
+    if (kind === "focus" && taskId && !openTasks.some((task) => task.id === taskId)) {
+      setSessionError("That task is already complete or no longer available.");
+      return;
+    }
     try {
       const acquired = await acquireSessionLock();
       if (!acquired) {
         setLockWarning(true);
         return;
       }
-      const started = startSession(kind === "focus" ? selectedTask?.id : undefined, minutes, kind);
+      const started = startSession(kind === "focus" ? taskId : undefined, minutes, kind);
+      releaseSessionLock();
       if (!started) {
-        releaseSessionLock();
         setLockWarning(true);
       } else {
         setLockWarning(false);
         setNotice(null);
       }
     } catch {
+      releaseSessionLock();
       setSessionError("Aevia couldn't save this session. Check your browser storage and try again.");
     }
   }
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!startRequest || handledStartRequestRef.current === startRequest.requestId) return;
+    handledStartRequestRef.current = startRequest.requestId;
+    onStartRequestHandled?.(startRequest.requestId);
+    if (!openTasks.some((task) => task.id === startRequest.taskId)) return;
+    setSelectedTaskId(startRequest.taskId);
+    panelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    void beginSession("focus", Math.max(5, startRequest.durationMinutes), startRequest.taskId);
+  }, [startRequest?.requestId, openTasks]);
 
   async function getStarterStep() {
     if (!contextTask || starterLoading) return;
@@ -175,15 +184,9 @@ export function FocusWidget({ requestedTaskId }: { requestedTaskId?: string }) {
     }
   }
 
-  async function runSessionControl(control: () => void) {
+  function runSessionControl(control: () => void) {
     setSessionError(null);
     try {
-      const acquired = await acquireSessionLock();
-      if (!acquired) {
-        setLockWarning(true);
-        return;
-      }
-      setLockWarning(false);
       control();
     } catch {
       setSessionError("Aevia couldn't save that change. Check your browser storage and try again.");
@@ -205,6 +208,38 @@ export function FocusWidget({ requestedTaskId }: { requestedTaskId?: string }) {
       setError("That thought could not be saved. Your text is still here; try again.");
     }
   }
+
+  if (immersive) return <section ref={panelRef} id="today-focus" className="w-full" aria-labelledby="focus-heading">
+    <div className="mx-auto flex min-h-[min(78vh,820px)] w-full flex-col items-center justify-center px-2 py-7 text-center sm:py-5">
+      <p className="text-[10px] font-medium uppercase tracking-[0.28em] text-[#dca75f]">{isBreak ? "A quiet break" : session?.status === "completed" ? "Focus session complete" : "Focus session"}</p>
+      <h1 id="focus-heading" className="mt-5 line-clamp-2 max-w-4xl font-serif text-[clamp(32px,4.3vw,54px)] leading-[1.12] tracking-[-0.025em] text-[#f0e6d9]">{isBreak ? "Take a breath" : displayTask ?? "A little room to think"}</h1>
+      <p className="mt-3 max-w-2xl truncate text-[clamp(14px,1.5vw,20px)] text-[#c9c0b5]">{starterStep ? `Next step: ${starterStep}` : contextTask?.notes ? `Next step: ${contextTask.notes}` : isBreak ? "Let your mind settle for a moment" : "Stay with this one thing, one step at a time"}</p>
+      <div ref={timerRef} tabIndex={-1} className="relative mt-9 flex h-[min(72vw,43vh,430px)] w-[min(72vw,43vh,430px)] min-h-[260px] min-w-[260px] items-center justify-center rounded-full outline-none sm:mt-11 sm:min-h-[320px] sm:min-w-[320px]" role="timer" aria-label={`${session ? timerLabel : `${duration}:00`} remaining`}>
+        <svg viewBox="0 0 112 112" className="absolute inset-0 h-full w-full -rotate-90" aria-hidden="true"><circle cx="56" cy="56" r="53" fill="none" stroke="#a99d8b" strokeOpacity=".19" strokeWidth="1.8"/><circle cx="56" cy="56" r="46" fill="none" stroke="#a99d8b" strokeOpacity=".12" strokeWidth=".35"/><circle cx="56" cy="56" r="53" fill="none" stroke="#e2a655" strokeOpacity=".94" strokeLinecap="round" strokeWidth="1.9" strokeDasharray={2 * Math.PI * 53} strokeDashoffset={session ? 2 * Math.PI * 53 * (1 - progress) : 0} className="transition-[stroke-dashoffset] duration-700 ease-out"/><circle cx="56" cy="3" r="1.4" fill="#f3ca91"/></svg>
+        <div className="absolute inset-[6%] rounded-full border border-white/[0.035]" />
+        <div className="relative flex flex-col items-center">
+          <span className="font-serif text-[clamp(66px,11vw,100px)] leading-none tabular-nums tracking-[-0.055em] text-[#f1e6d8]">{session ? timerLabel : `${String(duration).padStart(2, "0")}:00`}</span>
+          <span className="mt-3 text-[10px] font-medium uppercase tracking-[0.32em] text-[#c5b8a7]">{session?.status === "paused" ? "Paused" : "Remaining"}</span>
+        </div>
+      </div>
+      {active ? <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+        {session?.status === "paused" ? <button type="button" className="inline-flex h-[58px] min-w-[164px] items-center justify-center gap-3 rounded-full bg-gradient-to-br from-[#f2c990] to-[#dca762] px-7 text-[14px] font-medium text-[#17110a] shadow-[0_0_36px_rgba(210,151,82,0.12)] transition hover:brightness-105" onClick={() => void runSessionControl(resume)}><Play size={15} fill="currentColor"/> Resume</button> : <button type="button" className="inline-flex h-[58px] min-w-[164px] items-center justify-center gap-3 rounded-full bg-gradient-to-br from-[#f2c990] to-[#dca762] px-7 text-[14px] font-medium text-[#17110a] shadow-[0_0_36px_rgba(210,151,82,0.12)] transition hover:brightness-105" onClick={() => void runSessionControl(pause)}><Pause size={16} fill="currentColor"/> Pause</button>}
+        <button type="button" className="inline-flex h-[58px] min-w-[174px] items-center justify-center gap-3 rounded-full border border-white/[0.15] bg-black/20 px-7 text-[14px] text-[#e1d8cd] transition hover:border-white/25 hover:bg-white/[0.04]" onClick={() => void runSessionControl(end)}><X size={15}/> End session</button>
+      </div> : <p className="mt-8 text-[12px] text-white/60" role="status">{session?.status === "completed" ? `Your progress has been saved to ${artifactStyle.charAt(0).toUpperCase() + artifactStyle.slice(1)}.` : session?.status === "ended" ? "This session was saved." : "Choose a duration in the Focus panel."}</p>}
+      {active && <button type="button" onClick={() => void runSessionControl(finish)} className="mt-2 min-h-8 px-3 text-[10px] text-white/35 transition hover:text-white/70">Complete session</button>}
+      <div className="mt-8 w-full max-w-[525px] border-t border-[#d0a16a]/20 pt-5 sm:mt-10">
+        <div className="flex items-center justify-center gap-4 text-left">
+          <CircleHelp size={24} strokeWidth={1.5} className="shrink-0 text-[#dca75f]" />
+          <button type="button" aria-keyshortcuts="Control+J Meta+J" onClick={() => { setCaptureOpen(true); setError(null); }} className="min-h-10 text-left">
+            <span className="block text-[13px] text-[#eee6dc]">Got a distracting thought?</span><span className="mt-1 block text-[12px] text-white/55">Capture it without leaving Focus.</span>
+          </button>
+          <span className="ml-3 hidden rounded-lg border border-white/[0.12] px-2.5 py-2 text-[11px] text-white/55 sm:inline-flex">⌘ J</span>
+        </div>
+        {captureOpen && <form onSubmit={saveThought} className="mx-auto mt-4 w-full max-w-md rounded-xl border border-white/[0.12] bg-[#111113]/95 p-4 text-left shadow-xl" aria-label="Capture a distraction"><label htmlFor="focus-distraction" className="text-[11px] font-medium text-fg">What’s on your mind?</label><input id="focus-distraction" className="input mt-2 h-10 w-full" autoFocus maxLength={500} placeholder="Save a thought to return to later" value={thought} onChange={(event) => setThought(event.target.value)}/>{error && <p role="alert" className="mt-2 text-[10px] text-[#d39a76]">{error}</p>}<div className="mt-3 flex justify-end gap-2"><button type="button" className="btn h-9" onClick={() => { setCaptureOpen(false); setError(null); }}>Close</button><button type="submit" className="btn btn-gold h-9" disabled={!thought.trim()}>Save thought</button></div></form>}
+      </div>
+      {(sessionError || lockWarning) && <p role={sessionError ? "alert" : "status"} className="mt-3 text-[10px] text-[#d39a76]">{sessionError ?? "This session is active in another tab."}</p>}
+    </div>
+  </section>;
 
   return (
     <section ref={panelRef} id="today-focus" className="today-card overflow-hidden rounded-2xl" aria-labelledby="focus-heading">
@@ -280,7 +315,7 @@ export function FocusWidget({ requestedTaskId }: { requestedTaskId?: string }) {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[13px] font-medium text-fg">{isBreak ? "Take a breath" : displayTask ?? "Open focus"}</p>
                 <p className="mt-1 text-[10px] text-fg-muted">{session?.status === "paused" ? "Paused · your time is saved." : isBreak ? "Optional break. Your focus time is safe." : `${session?.durationMinutes} minute session · you’re doing fine.`}</p>
-                <button type="button" onClick={() => { setCaptureOpen(true); setError(null); }} className="mt-2 inline-flex min-h-9 items-center gap-1.5 rounded-lg text-[10px] text-gold hover:text-[var(--gold-strong)]"><CircleHelp size={12} /> Capture a distraction</button>
+                <button type="button" aria-keyshortcuts="Control+Shift+Space Meta+Shift+Space" onClick={() => { setCaptureOpen(true); setError(null); }} className="mt-2 inline-flex min-h-9 items-center gap-1.5 rounded-lg text-[10px] text-gold hover:text-[var(--gold-strong)]"><CircleHelp size={12} /> Capture a distraction</button>
               </div>
             </div>
             <div className="mt-3 flex gap-2">
