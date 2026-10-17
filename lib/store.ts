@@ -111,6 +111,8 @@ type State = {
   previewConflictReplan: (eventId: string) => ConflictReplanProposal | null;
   applyConflictReplan: (proposal: ConflictReplanProposal) => void;
   addEvents: (events: Array<Omit<CalendarEvent, "id">>) => string[];
+  setEventKind: (eventId: string, kind: CalendarEvent["kind"]) => void;
+  syncUnlinkedTaskEvents: () => void;
   updateEvent: (
     eventId: string,
     updates: Pick<CalendarEvent, "title" | "start" | "durationMinutes" | "kind" | "project" | "colorIndex">
@@ -833,6 +835,96 @@ export const useStore = create<State>()(persist((set, get) => ({
       return { events: [...s.events, ...newEvents] };
     });
     return createdIds;
+  },
+
+  setEventKind: (eventId, kind) => {
+    set((state) => {
+      const event = state.events.find((item) => item.id === eventId);
+      if (!event || event.kind === "lunch") return state;
+      if (event.kind === kind && (kind !== "task" || event.taskId)) return state;
+
+      let taskId = event.taskId;
+      let tasks = state.tasks;
+      if (kind === "task" && !taskId) {
+        taskId = nextEntityId("t", new Set(tasks.map((task) => task.id)));
+        tasks = [{
+          id: taskId,
+          title: event.title,
+          durationMinutes: event.durationMinutes,
+          deadline: event.start,
+          recurrence: { kind: "none" },
+          project: event.project ?? "personal",
+          colorIndex: event.colorIndex,
+        }, ...tasks];
+      } else if (kind !== "task") {
+        const hasOtherActiveTaskSession = taskId && state.events.some((item) =>
+          item.id !== eventId && item.taskId === taskId && item.kind === "task" && !item.cancelled
+        );
+        if (taskId && !hasOtherActiveTaskSession) {
+          tasks = tasks.filter((task) => task.id !== taskId);
+        }
+        taskId = undefined;
+      }
+
+      return {
+        tasks,
+        events: state.events.map((item) => item.id !== eventId ? item : {
+          ...item,
+          kind,
+          taskId,
+          locked: kind === "task" ? true : item.locked,
+          origin: "user",
+        }),
+      };
+    });
+  },
+
+  syncUnlinkedTaskEvents: () => {
+    set((state) => {
+      const unlinked = state.events.filter((event) =>
+        event.kind === "task" && !event.taskId && !event.cancelled
+      );
+      const staleTaskIds = new Set(state.tasks.filter((task) => {
+        if (task.completed) return false;
+        const stillHasTaskSession = state.events.some((event) =>
+          event.kind === "task" && event.taskId === task.id && !event.cancelled
+        );
+        if (stillHasTaskSession) return false;
+        return state.events.some((event) =>
+          (event.kind === "focus" || event.kind === "meeting") &&
+          !event.cancelled &&
+          event.title === task.title &&
+          event.start === task.deadline &&
+          event.durationMinutes === task.durationMinutes &&
+          (event.project ?? "personal") === task.project
+        );
+      }).map((task) => task.id));
+      if (unlinked.length === 0 && staleTaskIds.size === 0) return state;
+
+      const usedTaskIds = new Set(state.tasks.map((task) => task.id));
+      const createdTasks: Task[] = [];
+      const taskIdByEventId = new Map<string, string>();
+      for (const event of unlinked) {
+        const taskId = nextEntityId("t", usedTaskIds);
+        taskIdByEventId.set(event.id, taskId);
+        createdTasks.push({
+          id: taskId,
+          title: event.title,
+          durationMinutes: event.durationMinutes,
+          deadline: event.start,
+          recurrence: { kind: "none" },
+          project: event.project ?? "personal",
+          colorIndex: event.colorIndex,
+        });
+      }
+      return {
+        tasks: [...createdTasks, ...state.tasks.filter((task) => !staleTaskIds.has(task.id))],
+        events: state.events.map((event) => {
+          const taskId = taskIdByEventId.get(event.id);
+          return taskId ? { ...event, taskId } : event;
+        }),
+      };
+    });
   },
 
   updateEvent: (eventId, updates) => {

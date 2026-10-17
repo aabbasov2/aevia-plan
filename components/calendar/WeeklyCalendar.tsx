@@ -13,6 +13,7 @@ import { planningWeekStart } from "@/lib/planner";
 import { CALENDAR_DROP_SLOT_MINUTES, type CalendarView } from "@/lib/calendar-layout";
 import type { CalendarEvent } from "@/lib/types";
 import { EventEditorModal } from "./EventEditorModal";
+import { CalendarImportModal } from "./CalendarImportModal";
 
 type ClipboardEvent = Omit<CalendarEvent, "id">;
 
@@ -22,6 +23,7 @@ export function WeeklyCalendar() {
   const [eventOpen, setEventOpen] = useState(false);
   const [eventStart, setEventStart] = useState<Date | null>(null);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [selectedEventIds, setSelectedEventIds] = useState<string[]>([]);
   const [clipboardEvents, setClipboardEvents] = useState<ClipboardEvent[]>([]);
@@ -31,6 +33,7 @@ export function WeeklyCalendar() {
   const ensureLunchEvents = useStore((state) => state.ensureLunchEvents);
   const planWeek = useStore((state) => state.planWeek);
   const addEvents = useStore((state) => state.addEvents);
+  const createTask = useStore((state) => state.createTask);
   const updateEvent = useStore((state) => state.updateEvent);
   const deleteEvents = useStore((state) => state.deleteEvents);
   const setEventsCancelled = useStore((state) => state.setEventsCancelled);
@@ -240,6 +243,7 @@ export function WeeklyCalendar() {
             setEventStart(null);
             setEventOpen(true);
           }}
+          onImportScreenshot={() => setImportOpen(true)}
           onPreferences={() => setPreferencesOpen(true)}
         />
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-fg-subtle">
@@ -319,6 +323,26 @@ export function WeeklyCalendar() {
         open={preferencesOpen}
         onOpenChange={setPreferencesOpen}
         weekStartMs={visibleWeek.getTime()}
+      />
+      <CalendarImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        events={events}
+        onImport={(importedEvents) => {
+          const linkedEvents = importedEvents.map((event) => {
+            if (event.kind !== "task") return event;
+            const taskId = createTask({
+              title: event.title,
+              durationMinutes: event.durationMinutes,
+              deadline: event.start,
+              recurrence: { kind: "none" },
+              project: event.project ?? "personal",
+              colorIndex: event.colorIndex,
+            }, { autoSchedule: false });
+            return { ...event, taskId };
+          });
+          addEvents(linkedEvents);
+        }}
       />
       <EventEditorModal eventId={selectedEventId} onClose={() => setSelectedEventId(null)} />
     </>

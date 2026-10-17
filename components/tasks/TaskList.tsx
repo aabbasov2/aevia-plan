@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { addDays, isAfter, isBefore } from "date-fns";
 import { useStore } from "@/lib/store";
 import { TaskCard } from "./TaskCard";
@@ -10,6 +10,12 @@ import { AeviaArc } from "@/components/brand/AeviaArc";
 
 export function TaskList() {
   const tasks = useStore((s) => s.tasks);
+  const events = useStore((s) => s.events);
+  const syncUnlinkedTaskEvents = useStore((s) => s.syncUnlinkedTaskEvents);
+
+  useEffect(() => {
+    syncUnlinkedTaskEvents();
+  }, [events, syncUnlinkedTaskEvents]);
 
   const groups = useMemo(() => {
     const now = new Date();

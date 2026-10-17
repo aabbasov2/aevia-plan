@@ -4,11 +4,10 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import { addDays, format, startOfDay } from "date-fns";
 import { AlertTriangle, ArrowUpRight, CalendarDays, CheckCircle2, RotateCcw, Sparkles } from "lucide-react";
 import { AeviaArc } from "@/components/brand/AeviaArc";
-import { CreateTaskModal } from "@/components/tasks/CreateTaskModal";
 import { DayRecoveryModal } from "@/components/aevia/DayRecoveryModal";
-import { CreateEventModal } from "@/components/calendar/CreateEventModal";
 import { useStore } from "@/lib/store";
-import type { CalendarEvent, Task } from "@/lib/types";
+import type { CalendarEvent, ProjectKey, Task } from "@/lib/types";
+import { PROJECTS } from "@/lib/projects";
 import { weekStart } from "@/lib/time";
 import { buildPlan, planningWeekStart } from "@/lib/planner";
 
@@ -29,10 +28,13 @@ type CommandResult = {
   eventDate?: string;
   eventStartTime?: string;
   eventDurationMinutes?: number;
-  eventKind?: "meeting" | "personal" | "focus";
+  eventKind?: "meeting" | "task" | "focus";
   clarification?: string;
   response?: string;
 };
+
+type TaskProposal = { type: "task"; title: string; durationMinutes: number; deadlineDate: string; project: ProjectKey; sessionMinutes: number; splitIntoSessions: boolean };
+type EventProposal = { type: "event"; title: string; start: Date; durationMinutes: number; kind: "meeting" | "task" | "focus" };
 
 function localDateString(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -130,11 +132,11 @@ export function TodayCommandPanel({ onStartFocus }: { onStartFocus?: (taskId: st
   const markEventPromptAsked = useStore((state) => state.markEventPromptAsked);
   const respondToEventPrompt = useStore((state) => state.respondToEventPrompt);
   const toggleComplete = useStore((state) => state.toggleComplete);
+  const createTask = useStore((state) => state.createTask);
+  const createEvent = useStore((state) => state.createEvent);
+  const setEventKind = useStore((state) => state.setEventKind);
   const [request, setRequest] = useState("");
-  const [taskRequest, setTaskRequest] = useState("");
-  const [taskModalOpen, setTaskModalOpen] = useState(false);
-  const [eventModalOpen, setEventModalOpen] = useState(false);
-  const [eventDraft, setEventDraft] = useState<{ start: Date; title: string; durationMinutes: number; kind: "meeting" | "personal" | "focus" } | null>(null);
+  const [actionProposal, setActionProposal] = useState<TaskProposal | EventProposal | null>(null);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [recoveryDescription, setRecoveryDescription] = useState("");
   const [planPreview, setPlanPreview] = useState<PlanPreview | null>(null);
@@ -247,18 +249,29 @@ export function TodayCommandPanel({ onStartFocus }: { onStartFocus?: (taskId: st
 
       switch (command.intent) {
         case "create_task":
-          addAssistantMessage(command.response || "I can capture that as a task. Add any details you want, then I’ll prepare a schedule preview.");
-          setTaskRequest(message);
-          setTaskModalOpen(true);
+          {
+            const taskResponse = await fetch("/api/ai/interpret-task", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ message, today: localDateString(now), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
+            });
+            const taskData = await taskResponse.json();
+            if (!taskResponse.ok) throw new Error(taskData.error ?? "Aevia couldn't prepare that task.");
+            if (taskData.needsClarification) {
+              addAssistantMessage(taskData.clarification || "How much time do you expect this task to take?");
+              break;
+            }
+            setActionProposal({ type: "task", title: taskData.title, durationMinutes: taskData.durationMinutes, deadlineDate: taskData.deadlineDate, project: taskData.project, sessionMinutes: taskData.sessionMinutes, splitIntoSessions: taskData.splitIntoSessions });
+            addAssistantMessage("I’ve prepared this task. Review the details below and accept to add it.");
+          }
           break;
         case "create_event": {
-          if (command.response) addAssistantMessage(command.response);
           if (!command.eventDate || !command.eventStartTime || !command.eventTitle || !command.eventDurationMinutes) {
             addAssistantMessage(command.clarification || "What date, start time, and duration should I put on your calendar?");
             break;
           }
-          setEventDraft({ start: new Date(`${command.eventDate}T${command.eventStartTime}:00`), title: command.eventTitle, durationMinutes: command.eventDurationMinutes, kind: command.eventKind ?? "meeting" });
-          setEventModalOpen(true);
+          setActionProposal({ type: "event", start: new Date(`${command.eventDate}T${command.eventStartTime}:00`), title: command.eventTitle, durationMinutes: command.eventDurationMinutes, kind: command.eventKind ?? "meeting" });
+          addAssistantMessage("I’ve prepared this calendar event. Review the details below and accept to add it.");
           break;
         }
         case "plan_week": {
@@ -354,6 +367,37 @@ export function TodayCommandPanel({ onStartFocus }: { onStartFocus?: (taskId: st
     addAssistantMessage(summarizePeriod(tasks, events, start, addDays(start, 1), "Today"));
   }
 
+  function acceptActionProposal() {
+    if (!actionProposal) return;
+    if (actionProposal.type === "task") {
+      const deadline = actionProposal.deadlineDate ? new Date(`${actionProposal.deadlineDate}T23:59:59`).toISOString() : undefined;
+      createTask({
+        title: actionProposal.title,
+        durationMinutes: actionProposal.durationMinutes,
+        focusBlockMinutes: actionProposal.sessionMinutes,
+        splitPreference: actionProposal.splitIntoSessions,
+        ...(deadline ? { deadline } : {}),
+        recurrence: { kind: "none" },
+        project: actionProposal.project,
+        colorIndex: 3,
+      }, { autoSchedule: false });
+      addAssistantMessage(`Added “${actionProposal.title}” to Tasks. You can ask me to find time for it whenever you’re ready.`);
+    } else {
+      const result = createEvent({
+        title: actionProposal.title,
+        start: actionProposal.start.toISOString(),
+        durationMinutes: actionProposal.durationMinutes,
+        kind: actionProposal.kind,
+        origin: "user",
+        project: "work",
+        colorIndex: 4,
+      });
+      if (actionProposal.kind === "task" && result.eventId) setEventKind(result.eventId, "task");
+      addAssistantMessage(`Added “${actionProposal.title}” to your calendar.`);
+    }
+    setActionProposal(null);
+  }
+
   function showRisks() {
     const now = new Date();
     const start = weekStart(now);
@@ -373,6 +417,18 @@ export function TodayCommandPanel({ onStartFocus }: { onStartFocus?: (taskId: st
           {messages.map((message) => <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
             <div className={`max-w-[92%] whitespace-pre-wrap rounded-xl px-3.5 py-3 text-[12px] leading-5 ${message.role === "user" ? "rounded-tr-sm bg-[var(--gold-soft)] text-fg" : "rounded-tl-sm bg-[var(--surface-2)] text-fg-muted"}`}>{message.role === "assistant" && <Sparkles size={13} className="mr-1.5 inline text-gold" />}{message.content}</div>
           </div>)}
+          {actionProposal && <div className="max-w-[96%] overflow-hidden rounded-xl border border-[var(--gold)]/30 bg-[var(--surface)]" aria-live="polite">
+            <div className="flex items-start gap-2 border-b border-[var(--border)] px-3.5 py-3"><Sparkles size={14} className="mt-0.5 shrink-0 text-gold" /><div><p className="text-[12px] font-medium text-fg">Review proposed {actionProposal.type === "task" ? "task" : "calendar event"}</p><p className="mt-0.5 text-[10px] text-fg-muted">Accept to add it to Aevia.</p></div></div>
+            <div className="space-y-1.5 px-3.5 py-3 text-[11px]"><p className="font-medium text-fg">{actionProposal.title}</p>
+              {actionProposal.type === "task" ? <><p className="text-fg-muted">Task · {actionProposal.durationMinutes} min · {PROJECTS[actionProposal.project].label}</p>{actionProposal.deadlineDate && <p className="text-fg-muted">Due {format(new Date(`${actionProposal.deadlineDate}T12:00:00`), "EEE, MMM d, yyyy")}</p>}</>
+                : <><p className="text-fg-muted">{actionProposal.kind[0].toUpperCase() + actionProposal.kind.slice(1)} · {format(actionProposal.start, "EEE, MMM d · HH:mm")} · {actionProposal.durationMinutes} min</p>{(() => {
+                  const proposedEnd = actionProposal.start.getTime() + actionProposal.durationMinutes * 60_000;
+                  const overlaps = events.filter((item) => !item.cancelled && new Date(item.start).getTime() < proposedEnd && new Date(item.start).getTime() + item.durationMinutes * 60_000 > actionProposal.start.getTime());
+                  return overlaps.length ? <p className="text-[#e6a07d]">Overlaps with {overlaps.map((item) => item.title).join(", ")}</p> : null;
+                })()}</>}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-[var(--border)] px-3.5 py-2.5"><button type="button" className="btn h-7 px-2.5 text-[10px]" onClick={() => setActionProposal(null)}>Dismiss</button><button type="button" className="btn btn-gold h-7 px-2.5 text-[10px]" onClick={acceptActionProposal}>Accept and add</button></div>
+          </div>}
           {pendingEventPrompts.map(({ type, event, task }) => <div key={`${type}-${event.id}`} className="max-w-[92%] rounded-xl rounded-tl-sm border border-[var(--gold)]/25 bg-[var(--surface-2)] px-3.5 py-3 text-[12px] leading-5 text-fg">
             <div className="flex items-start gap-2"><Sparkles size={13} className="mt-1 shrink-0 text-gold" /><p>{type === "focus" ? `Focus block · ${task.title} at ${format(new Date(event.start), "HH:mm")}` : `${task.title} block ended at ${format(new Date(new Date(event.start).getTime() + event.durationMinutes * 60_000), "HH:mm")}`}</p></div>
             <div className="mt-2 flex flex-wrap gap-2 pl-5">
@@ -398,13 +454,11 @@ export function TodayCommandPanel({ onStartFocus }: { onStartFocus?: (taskId: st
         {planPreview && <PlanPreviewCard preview={planPreview} tasks={tasks} onApply={applyPlanPreview} onCancel={() => setPlanPreview(null)} />}
         <form onSubmit={handleSubmit} className="mt-5 flex items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--bg)] p-2 pl-3 focus-within:border-[var(--ring)]">
           <input value={request} onChange={(event) => setRequest(event.target.value)} className="min-w-0 flex-1 bg-transparent text-[11px] text-fg outline-none placeholder:text-fg-subtle" placeholder="Ask about your plan, or tell Aevia what to schedule…" aria-label="Ask Aevia about your schedule" />
-          <button disabled={!request.trim() || busy} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--gold)] text-[#12100d] transition hover:brightness-110 disabled:opacity-40" aria-label="Send request to Aevia">{busy ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-r-transparent" /> : <ArrowUpRight size={15} />}</button>
+          <button disabled={!request.trim() || busy || Boolean(actionProposal)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--gold)] text-[#12100d] transition hover:brightness-110 disabled:opacity-40" aria-label="Send request to Aevia">{busy ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-r-transparent" /> : <ArrowUpRight size={15} />}</button>
         </form>
         <p className="mt-2 text-[9px] leading-4 text-fg-subtle">Ask about tasks, deadlines, your calendar, or free time. Aevia acts on your schedule data instead of making up an answer.</p>
       </div>
     </section>
-    <CreateTaskModal open={taskModalOpen} onOpenChange={(open) => { setTaskModalOpen(open); if (!open) setTaskRequest(""); }} initialRequest={taskRequest} deferScheduling={Boolean(taskRequest)} />
-    <CreateEventModal open={eventModalOpen} onOpenChange={(open) => { setEventModalOpen(open); if (!open) setEventDraft(null); }} initialStart={eventDraft?.start} initialTitle={eventDraft?.title} initialDurationMinutes={eventDraft?.durationMinutes} initialKind={eventDraft?.kind} />
     <DayRecoveryModal open={recoveryOpen} onOpenChange={setRecoveryOpen} initialDescription={recoveryDescription} />
   </>;
 }

@@ -24,6 +24,7 @@ export function CalendarHeader({
   onAnchorChange,
   onViewChange,
   onAddEvent,
+  onImportScreenshot,
   onPreferences,
 }: {
   anchorDate: Date;
@@ -31,12 +32,14 @@ export function CalendarHeader({
   onAnchorChange: (date: Date) => void;
   onViewChange: (view: CalendarView) => void;
   onAddEvent: () => void;
+  onImportScreenshot: () => void;
   onPreferences: () => void;
 }) {
   const planWeek = useStore((state) => state.planWeek);
   const clearPlan = useStore((state) => state.clearPlan);
   const [planned, setPlanned] = useState(false);
   const [cleared, setCleared] = useState(false);
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
   const ws = weekStart(anchorDate);
   const end = addDays(ws, 6);
   const weekLabel =
@@ -78,9 +81,15 @@ export function CalendarHeader({
           <div className="wordmark text-[11px] text-fg-muted">CALENDAR</div>
           <h1 className="display mt-2 text-fg">{label}</h1>
         </div>
-        <button className="btn btn-gold hidden h-10 shrink-0 px-4 sm:inline-flex" onClick={onAddEvent}>
-          + New event
-        </button>
+        <div className="relative hidden sm:block">
+          <button className="btn btn-gold h-10 shrink-0 px-4" onClick={() => setNewMenuOpen((open) => !open)} aria-expanded={newMenuOpen}>
+            + New
+          </button>
+          {newMenuOpen && <div className="absolute right-0 top-full z-50 mt-2 w-48 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1 shadow-xl">
+            <button className="w-full rounded-lg px-3 py-2 text-left text-[12px] text-fg hover:bg-[var(--surface-2)]" onClick={() => { setNewMenuOpen(false); onAddEvent(); }}>Add event</button>
+            <button className="w-full rounded-lg px-3 py-2 text-left text-[12px] text-fg hover:bg-[var(--surface-2)]" onClick={() => { setNewMenuOpen(false); onImportScreenshot(); }}>Import screenshot</button>
+          </div>}
+        </div>
       </div>
       <div className="flex flex-col gap-3 border-t border-[var(--border)] pt-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-wrap items-center gap-2">
@@ -134,7 +143,13 @@ export function CalendarHeader({
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5">
-          <button className="btn btn-gold h-9 px-3 sm:hidden" onClick={onAddEvent}>+ New event</button>
+          <div className="relative sm:hidden">
+            <button className="btn btn-gold h-9 px-3" onClick={() => setNewMenuOpen((open) => !open)} aria-expanded={newMenuOpen}>+ New</button>
+            {newMenuOpen && <div className="absolute right-0 top-full z-50 mt-2 w-48 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1 shadow-xl">
+              <button className="w-full rounded-lg px-3 py-2 text-left text-[12px] text-fg hover:bg-[var(--surface-2)]" onClick={() => { setNewMenuOpen(false); onAddEvent(); }}>Add event</button>
+              <button className="w-full rounded-lg px-3 py-2 text-left text-[12px] text-fg hover:bg-[var(--surface-2)]" onClick={() => { setNewMenuOpen(false); onImportScreenshot(); }}>Import screenshot</button>
+            </div>}
+          </div>
           <button className="btn h-9 px-3" onClick={onPreferences}>
             <SlidersHorizontal size={13} /> Preferences
           </button>

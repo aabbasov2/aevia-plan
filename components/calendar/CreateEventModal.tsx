@@ -16,8 +16,8 @@ const DURATIONS = [
 
 const EVENT_TYPES: Array<{ label: string; value: CalendarEvent["kind"] }> = [
   { label: "Meeting", value: "meeting" },
+  { label: "Task", value: "task" },
   { label: "Focus", value: "focus" },
-  { label: "Personal", value: "personal" },
 ];
 
 export function CreateEventModal({
@@ -36,6 +36,7 @@ export function CreateEventModal({
   onOpenChange: (open: boolean) => void;
 }) {
   const createEvent = useStore((s) => s.createEvent);
+  const setEventKind = useStore((s) => s.setEventKind);
   const previewConflictReplan = useStore((s) => s.previewConflictReplan);
   const applyConflictReplan = useStore((s) => s.applyConflictReplan);
   const [title, setTitle] = useState("");
@@ -53,7 +54,7 @@ export function CreateEventModal({
     setStart(toLocalInputValue(initialStart ?? new Date()));
     setEnd("");
     setDuration(initialDurationMinutes ?? 60);
-    setKind(initialKind === "meeting" || initialKind === "personal" || initialKind === "focus" ? initialKind : "meeting");
+    setKind(initialKind === "meeting" || initialKind === "task" || initialKind === "focus" ? initialKind : "meeting");
     setMessage(null);
     setConflictProposal(null);
   }, [initialDurationMinutes, initialKind, initialStart, initialTitle, open]);
@@ -79,6 +80,7 @@ export function CreateEventModal({
       setMessage(result.message ?? "That time is unavailable.");
       return;
     }
+    if (result.eventId) setEventKind(result.eventId, kind);
     const proposal = result.eventId ? previewConflictReplan(result.eventId) : null;
     if (proposal?.overlaps.length) {
       setConflictProposal(proposal);

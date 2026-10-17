@@ -10,8 +10,8 @@ import { weekStart } from "@/lib/time";
 
 const EVENT_TYPES: Array<{ label: string; value: CalendarEvent["kind"] }> = [
   { label: "Meeting", value: "meeting" },
+  { label: "Task", value: "task" },
   { label: "Focus", value: "focus" },
-  { label: "Personal", value: "personal" },
 ];
 
 export function EventEditorModal({
@@ -26,6 +26,8 @@ export function EventEditorModal({
   const event = useStore((state) => state.events.find((item) => item.id === eventId));
   const task = useStore((state) => state.tasks.find((item) => item.id === event?.taskId));
   const updateEvent = useStore((state) => state.updateEvent);
+  const setEventKind = useStore((state) => state.setEventKind);
+  const updateTask = useStore((state) => state.updateTask);
   const updateTaskDeadline = useStore((state) => state.updateTaskDeadline);
   const unschedule = useStore((state) => state.unschedule);
   const setEventsCancelled = useStore((state) => state.setEventsCancelled);
@@ -45,7 +47,7 @@ export function EventEditorModal({
     setTitle(event.title);
     setStart(toLocalInputValue(startDate));
     setEnd(toLocalInputValue(endDate));
-    setKind(event.kind);
+    setKind(event.kind === "personal" ? "focus" : event.kind);
     setProject(event.project ?? "work");
     setDeadline(task?.deadline ? toLocalInputValue(new Date(task.deadline)) : "");
     setMessage(null);
@@ -81,7 +83,7 @@ export function EventEditorModal({
       title: title.trim(),
       start: startDate.toISOString(),
       durationMinutes,
-      kind: event.kind === "task" || event.kind === "lunch" ? event.kind : kind,
+      kind: event.kind === "lunch" ? event.kind : kind,
       project,
       colorIndex: colorForProject(project),
     });
@@ -89,7 +91,13 @@ export function EventEditorModal({
       setMessage(result.message ?? "That time is unavailable.");
       return;
     }
-    if (event.taskId) {
+    if (event.kind !== "lunch") setEventKind(event.id, kind);
+    if (event.taskId && kind === "task") {
+      updateTask(event.taskId, {
+        title: title.trim(),
+        project,
+        colorIndex: colorForProject(project),
+      });
       updateTaskDeadline(
         event.taskId,
         deadline ? new Date(deadline).toISOString() : undefined
@@ -126,7 +134,7 @@ export function EventEditorModal({
     setEventsCancelled([event.id], !event.cancelled);
   }
 
-  const fixedKind = event.kind === "task" || event.kind === "lunch";
+  const fixedKind = event.kind === "lunch";
 
   return (
     <div
@@ -168,7 +176,7 @@ export function EventEditorModal({
             <Field label="Type">
               {fixedKind ? (
                 <div className="input flex items-center gap-2 text-fg-muted">
-                  <CalendarClock size={14} /> {event.kind === "lunch" ? "Lunch" : "Scheduled task"}
+                  <CalendarClock size={14} /> Lunch
                 </div>
               ) : (
                 <select className="input" value={kind} onChange={(inputEvent) => setKind(inputEvent.target.value as CalendarEvent["kind"])}>
