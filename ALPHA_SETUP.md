@@ -14,13 +14,13 @@ This app uses Supabase Auth and Postgres. The browser receives only the Supabase
 
 ## Local and Vercel environment
 
-Copy `.env.example` to `.env.local` and fill in the URL and publishable key from the Supabase project’s Connect dialog. Keep `GEMINI_API_KEY` server-only. Do not add a service-role key to the application, a `NEXT_PUBLIC_` variable, or the repository.
+Copy `.env.example` to `.env.local` and fill in the URL and publishable key from the Supabase project’s Connect dialog. Keep `GROQ_API_KEY` server-only. Do not add a service-role key to the application, a `NEXT_PUBLIC_` variable, or the repository.
 
 Add these environment variables to both **Preview** and **Production** in Vercel:
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-- `GEMINI_API_KEY` (if using Aevia AI in that deployment)
+- `GROQ_API_KEY` (for Aevia AI in that deployment)
 
 Use the same Supabase project for the two-founder alpha’s Preview and Production URLs only if both deployments are intended to show the same plan. Otherwise create separate Supabase projects and apply the migration to each.
 

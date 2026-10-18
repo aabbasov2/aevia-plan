@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { generateGeminiContent } from "@/lib/gemini";
+import { generateGroqContent } from "@/lib/groq";
 
 export const maxDuration = 30;
 
@@ -19,9 +19,8 @@ const responseSchema = {
 } as const;
 
 export async function POST(request: Request) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json({ error: "Gemini is not configured. Add GEMINI_API_KEY to your environment and restart Aevia." }, { status: 503 });
+  if (!process.env.GROQ_API_KEY) {
+    return NextResponse.json({ error: "Groq is not configured. Add GROQ_API_KEY to your environment and restart Aevia." }, { status: 503 });
   }
 
   let body: {
@@ -53,7 +52,7 @@ export async function POST(request: Request) {
     : [];
 
   try {
-    const response = await generateGeminiContent(apiKey, {
+    const response = await generateGroqContent({
       systemInstruction: {
         parts: [{ text: [
           "Interpret a user's report that their day or week changed, so a calendar can be replanned.",
@@ -76,13 +75,13 @@ export async function POST(request: Request) {
 
     if (!response.ok) {
       const errorBody = await response.json().catch(() => null);
-      console.error("Gemini disruption interpretation failed", response.status, errorBody?.error?.status ?? "unknown");
-      return NextResponse.json({ error: "Aevia couldn't interpret that change. Check the Gemini API key and try again." }, { status: 502 });
+      console.error("Groq disruption interpretation failed", response.status, errorBody?.error?.code ?? "unknown");
+      return NextResponse.json({ error: "Aevia couldn't interpret that change. Check the Groq API key and try again." }, { status: 502 });
     }
 
     const payload = await response.json();
     const text = payload.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text ?? "").join("");
-    if (!text) return NextResponse.json({ error: "Gemini returned an empty response. Please try again." }, { status: 502 });
+    if (!text) return NextResponse.json({ error: "Groq returned an empty response. Please try again." }, { status: 502 });
     const parsed = JSON.parse(text);
     if (![
       "unavailable_window",
@@ -116,7 +115,7 @@ export async function POST(request: Request) {
       clarification: parsed.clarification.trim().slice(0, 240),
     });
   } catch (error) {
-    console.error("Gemini disruption request failed", error instanceof Error ? error.name : "unknown error");
-    return NextResponse.json({ error: "Aevia couldn't reach Gemini just now. Please try again." }, { status: 502 });
+    console.error("Groq disruption request failed", error instanceof Error ? error.name : "unknown error");
+    return NextResponse.json({ error: "Aevia couldn't reach Groq just now. Please try again." }, { status: 502 });
   }
 }

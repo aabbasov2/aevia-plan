@@ -1,8 +1,7 @@
-# Gemini setup
+# Aevia AI setup
 
-1. Create a Gemini API key in [Google AI Studio](https://aistudio.google.com/apikey).
-2. In the project root, copy `.env.example` to `.env.local`.
-3. Set `GEMINI_API_KEY=your-key` in `.env.local`.
-4. Restart the Aevia development server.
+1. Create a Groq API key in the [Groq console](https://console.groq.com/keys).
+2. Set `GROQ_API_KEY=your-key` in `.env.local`.
+3. Restart the Aevia development server.
 
-The key is read only by the server route at `/api/ai/interpret-task`. Do not add it to client-side code or commit `.env.local`.
+Aevia uses Qwen 3.8 27B first, then falls back to GPT OSS 120B and GPT OSS 20B for text-based AI requests. Calendar screenshot import uses Qwen 3.8 27B because it is the configured Groq model with image input. The key is read only by server routes. Do not add it to client-side code or commit `.env.local`.
