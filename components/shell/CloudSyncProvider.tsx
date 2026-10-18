@@ -104,7 +104,13 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
         if (result.error.code === "40001" || result.error.message.toLowerCase().includes("workspace conflict")) blockedByConflict.current = true;
         throw result.error;
       }
-      revision.current = Number(result.data);
+      const savedRevision = Number(result.data);
+      if (!Number.isFinite(savedRevision)) throw new Error("Aevia received an invalid workspace revision.");
+      if (savedRevision < 0) {
+        blockedByConflict.current = true;
+        throw new Error("The cloud workspace changed before this save completed.");
+      }
+      revision.current = savedRevision;
       lastSyncedWorkspace.current = cloneWorkspace(payload);
       if (state.assistantMessages.length) {
         const chatSave = await createClient().from("assistant_messages").upsert(
