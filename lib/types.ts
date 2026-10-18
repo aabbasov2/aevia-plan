@@ -14,6 +14,17 @@ export type ProjectKey =
 
 export type FocusArtifactStyle = "arc" | "skyline" | "terrain" | "orbit";
 
+export type CalendarEventRecurrence = {
+  frequency: "daily" | "weekly" | "monthly";
+  interval?: number;
+  /** JavaScript weekday numbers (0 = Sunday) for weekly patterns. */
+  daysOfWeek?: number[];
+  /** Optional day of month; defaults to the event's original day. */
+  dayOfMonth?: number;
+  /** Inclusive end instant; omitted means the series continues. */
+  until?: string;
+};
+
 export type Task = {
   id: string;
   title: string;
@@ -42,11 +53,22 @@ export type AssistantMessage = {
 
 export type CalendarEvent = {
   id: string;
+  /** Google Calendar event link, when this item is mirrored to/from Google. */
+  googleEventId?: string;
+  googleCalendarId?: string;
   title: string;
   /** ISO datetime for start */
   start: string;
   /** minutes */
   durationMinutes: number;
+  /** Optional all-day marker for imported or manually-created calendar items. */
+  allDay?: boolean;
+  /** Free items remain visible but do not reserve scheduling capacity. */
+  availability?: "busy" | "free";
+  /** External invitation response; declined items do not reserve scheduling capacity. */
+  responseStatus?: "accepted" | "tentative" | "declined";
+  /** Optional repeating schedule; each occurrence uses the event's local wall time. */
+  recurrence?: CalendarEventRecurrence;
   /** if this event is a scheduled task, carry its id */
   taskId?: string;
   kind: "meeting" | "focus" | "personal" | "task" | "lunch";
