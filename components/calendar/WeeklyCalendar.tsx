@@ -342,6 +342,8 @@ export function WeeklyCalendar() {
             return { ...event, taskId };
           });
           addEvents(linkedEvents);
+          const importedWeeks = new Set(linkedEvents.map((event) => weekStart(new Date(event.start)).getTime()));
+          for (const weekMs of importedWeeks) ensureLunchEvents(weekMs);
         }}
       />
       <EventEditorModal eventId={selectedEventId} onClose={() => setSelectedEventId(null)} />

@@ -569,16 +569,31 @@ export const useStore = create<State>()(persist((set, get) => ({
       const canReplanThisWeek =
         weekStart(baseWeek).getTime() === activePlanningWeek.getTime();
       const now = new Date();
-      const existingIds = new Set(s.events.map((event) => event.id));
       const lunches: CalendarEvent[] = [];
+      const movedLunches = new Map<string, string>();
+      const removedLunchIds = new Set<string>();
       for (let dayIndex = 0; dayIndex < 5; dayIndex += 1) {
         const day = addDays(baseWeek, dayIndex);
         const id = lunchIdFor(day);
-        if (existingIds.has(id)) continue;
+        const existingLunch = s.events.find((event) => event.id === id && event.kind === "lunch");
+        const dayStart = new Date(day);
+        dayStart.setHours(0, 0, 0, 0);
+        const nextDay = addDays(dayStart, 1);
+        const dayEvents = s.events.filter((event) => {
+          if (event.id === id || event.cancelled) return false;
+          const start = new Date(event.start);
+          return start >= dayStart && start < nextDay;
+        });
+        const hasExplicitLunch = dayEvents.some((event) => /\b(lunch|meal)\b/i.test(event.title));
+        if (hasExplicitLunch) {
+          if (existingLunch?.origin === "aevia") removedLunchIds.add(id);
+          continue;
+        }
         const preferredStart = new Date(
           makeIsoAt(dayIndex, s.plannerPreferences.lunchStartMinutes, baseWeek)
         );
         const fixedEvents = s.events.filter((event) => {
+          if (event.id === id) return false;
           const task = event.taskId
             ? s.tasks.find((item) => item.id === event.taskId)
             : undefined;
@@ -598,21 +613,30 @@ export const useStore = create<State>()(persist((set, get) => ({
           s.plannerPreferences,
           [...fixedEvents, ...lunches]
         );
-        lunches.push({
-          id,
-          title: "Lunch",
-          start: lunchStart.toISOString(),
-          durationMinutes: s.plannerPreferences.lunchDurationMinutes,
-          kind: "lunch",
-          origin: "aevia",
-          project: "personal",
-          colorIndex: 1,
-          locked: true,
-        });
+        if (existingLunch) {
+          if (new Date(existingLunch.start).getTime() !== lunchStart.getTime()) {
+            movedLunches.set(id, lunchStart.toISOString());
+          }
+        } else {
+          lunches.push({
+            id,
+            title: "Lunch",
+            start: lunchStart.toISOString(),
+            durationMinutes: s.plannerPreferences.lunchDurationMinutes,
+            kind: "lunch",
+            origin: "aevia",
+            project: "personal",
+            colorIndex: 1,
+            locked: true,
+          });
+        }
       }
-      if (lunches.length === 0) return s;
-      addedLunch = true;
-      return { events: [...s.events, ...lunches] };
+      const events = s.events
+        .filter((event) => !removedLunchIds.has(event.id))
+        .map((event) => movedLunches.has(event.id) ? { ...event, start: movedLunches.get(event.id)! } : event);
+      if (lunches.length === 0 && movedLunches.size === 0 && removedLunchIds.size === 0) return s;
+      addedLunch = lunches.length > 0;
+      return { events: [...events, ...lunches] };
     });
     return addedLunch;
   },
