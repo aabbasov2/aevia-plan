@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "NODE_USE_SYSTEM_CA=1 next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "NODE_USE_SYSTEM_CA=1 next start",
     "lint": "next lint",
     "test:focus": "node --experimental-strip-types --test lib/focus-time.test.mts",
     "test:alpha-security": "node scripts/verify-alpha-security.mjs"
