@@ -2,6 +2,7 @@ import { addDays, addMinutes, isBefore, startOfDay } from "date-fns";
 import type { CalendarEvent, PlannerPreferences, Task } from "./types";
 import { weekStart } from "./time";
 import { DEFAULT_PLANNER_PREFERENCES } from "./preferences";
+import { expandCalendarEventOccurrences, isBlockingCalendarEvent } from "./calendar-conflicts";
 
 const SLOT = 10;
 const MAX_FOCUS_BLOCK_MINUTES = 120;
@@ -35,18 +36,17 @@ export function buildPlan(
 ) {
   const ws = weekStart(targetWeek);
   const isCurrentWeek = ws.getTime() === weekStart(now).getTime();
-  const occupied = events.filter((event) => !event.cancelled).map((event) => ({
-    start: addMinutes(new Date(event.start), -preferences.bufferMinutes),
-    end: addMinutes(
-      new Date(event.start),
-      event.durationMinutes + preferences.bufferMinutes
-    ),
+  const weekStartAt = startOfDay(ws).getTime();
+  const weekEndAt = addDays(ws, 7).getTime();
+  const occupied = expandCalendarEventOccurrences(events, weekStartAt, weekEndAt).map((occurrence) => ({
+    start: addMinutes(new Date(occurrence.start), -preferences.bufferMinutes),
+    end: addMinutes(new Date(occurrence.end), preferences.bufferMinutes),
   }));
   const blocks: PlannedBlock[] = [];
   const unscheduled: string[] = [];
   const scheduledByTask = new Map<string, number>();
   for (const event of events) {
-    if (!event.cancelled && event.taskId && new Date(event.start) >= now) {
+    if (isBlockingCalendarEvent(event) && event.taskId && new Date(event.start) >= now) {
       scheduledByTask.set(
         event.taskId,
         (scheduledByTask.get(event.taskId) ?? 0) + event.durationMinutes

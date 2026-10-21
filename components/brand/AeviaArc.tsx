@@ -8,9 +8,10 @@ type Props = {
   className?: string;
   pulse?: boolean;
   monochrome?: boolean;
+  state?: "idle" | "thinking" | "finished" | "error";
 };
 
-export function AeviaArc({ size = 24, className, pulse = false, monochrome = false }: Props) {
+export function AeviaArc({ size = 24, className, pulse = false, monochrome = false, state = "idle" }: Props) {
   const instanceId = useId().replace(/:/g, "");
   const gradientId = `arc-grad-${monochrome ? "mono" : "gold"}-${instanceId}`;
   return (
@@ -21,7 +22,7 @@ export function AeviaArc({ size = 24, className, pulse = false, monochrome = fal
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"
-      className={cn("shrink-0", pulse && "arc-pulse", className)}
+      className={cn("shrink-0", pulse && "arc-pulse", `arc-state-${state}`, className)}
     >
       <defs>
         <linearGradient id={gradientId} x1="8" y1="52" x2="56" y2="12" gradientUnits="userSpaceOnUse">

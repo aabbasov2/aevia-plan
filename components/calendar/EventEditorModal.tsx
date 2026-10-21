@@ -152,6 +152,7 @@ export function EventEditorModal({
               {origin === "aevia" ? "Placed by Aevia" : "Placed by you"}
             </div>
             <h2 className="h2 text-fg">Edit calendar event</h2>
+            {event.recurrence && <p className="mt-1 text-[10px] text-fg-muted">Repeating event · edits apply to the full series.</p>}
           </div>
           <button className="btn btn-ghost h-8 w-8 p-0" onClick={onClose} aria-label="Close">
             <X size={14} />

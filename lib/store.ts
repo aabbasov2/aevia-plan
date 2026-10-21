@@ -7,6 +7,7 @@ import type { AssistantMessage, CalendarEvent, Commitment, FocusArtifactStyle, I
 import { weekStart } from "./time";
 import { buildPlan, MAX_FOCUS_BLOCK_MINUTES, planningWeekStart } from "./planner";
 import { DEFAULT_PLANNER_PREFERENCES } from "./preferences";
+import { calendarEventInterval, findCalendarOverlaps, isBlockingCalendarEvent, type CalendarOverlap } from "./calendar-conflicts";
 import type { DayRecoveryProposal } from "./recovery";
 import {
   completeFocusSession,
@@ -88,6 +89,7 @@ type State = {
   inboxItems: InboxItem[];
   assistantMessages: AssistantMessage[];
   appendAssistantMessage: (message: Pick<AssistantMessage, "role" | "content">) => void;
+  clearAssistantMessages: () => void;
   startFocusSession: (taskId: string | undefined, durationMinutes: number, kind?: FocusSessionKind) => boolean;
   pauseFocus: () => void;
   resumeFocus: () => void;
@@ -108,8 +110,8 @@ type State = {
   scheduleTaskBeforeDeadline: (taskId: string) => void;
   scheduleUnscheduledTask: (taskId: string) => { scheduled: boolean; scheduledMinutes: number };
   createEvent: (e: Omit<CalendarEvent, "id">) => { created: boolean; movedTask: boolean; eventId?: string; message?: string };
-  previewConflictReplan: (eventId: string) => ConflictReplanProposal | null;
-  applyConflictReplan: (proposal: ConflictReplanProposal) => void;
+  previewConflictReplan: (eventId: string, occurrenceStart?: string) => ConflictReplanProposal | null;
+  applyConflictReplan: (proposal: ConflictReplanProposal) => boolean;
   addEvents: (events: Array<Omit<CalendarEvent, "id">>) => string[];
   setEventKind: (eventId: string, kind: CalendarEvent["kind"]) => void;
   syncUnlinkedTaskEvents: () => void;
@@ -149,6 +151,7 @@ type State = {
 
 export type ConflictReplanProposal = {
   overlaps: CalendarEvent[];
+  details: CalendarOverlap[];
   conflicts: CalendarEvent[];
   displaced: CalendarEvent[];
   replacements: Array<Omit<CalendarEvent, "id">>;
@@ -209,7 +212,7 @@ function nearestAvailableLunchStart(
   day: Date,
   preferences: PlannerPreferences,
   events: CalendarEvent[]
-) {
+): Date | null {
   const dayStart = new Date(day);
   dayStart.setHours(0, 0, 0, 0);
   const workStart = new Date(dayStart.getTime() + preferences.workStartMinutes * 60_000);
@@ -219,14 +222,10 @@ function nearestAvailableLunchStart(
     const end = new Date(start.getTime() + durationMs);
     if (start < workStart || end > workEnd) return false;
     return !events.some((event) => {
-      if (event.cancelled) return false;
-      const eventStart = new Date(
-        new Date(event.start).getTime() - preferences.bufferMinutes * 60_000
-      );
-      const eventEnd = new Date(
-        new Date(event.start).getTime() +
-          (event.durationMinutes + preferences.bufferMinutes) * 60_000
-      );
+      const interval = calendarEventInterval(event);
+      if (!interval) return false;
+      const eventStart = new Date(interval.start - preferences.bufferMinutes * 60_000);
+      const eventEnd = new Date(interval.end + preferences.bufferMinutes * 60_000);
       return start < eventEnd && end > eventStart;
     });
   };
@@ -241,7 +240,7 @@ function nearestAvailableLunchStart(
     const available = candidates.find(isAvailable);
     if (available) return available;
   }
-  return preferredStart;
+  return null;
 }
 
 function newUuid() {
@@ -359,6 +358,7 @@ export const useStore = create<State>()(persist((set, get) => ({
   appendAssistantMessage: (message) => set((state) => ({
     assistantMessages: [...state.assistantMessages, { ...message, id: newUuid(), createdAt: Date.now() }].slice(-100),
   })),
+  clearAssistantMessages: () => set({ assistantMessages: [] }),
   startFocusSession: (taskId, durationMinutes, kind = "focus") => {
     const { focusSession, tasks } = get();
     if (focusSession && (focusSession.status === "running" || focusSession.status === "paused")) return false;
@@ -605,7 +605,7 @@ export const useStore = create<State>()(persist((set, get) => ({
             !task.completed &&
             !event.locked &&
             event.origin !== "user";
-          return !isFutureMovableTask;
+          return !isBlockingCalendarEvent(event) || !isFutureMovableTask;
         });
         const lunchStart = nearestAvailableLunchStart(
           preferredStart,
@@ -613,6 +613,10 @@ export const useStore = create<State>()(persist((set, get) => ({
           s.plannerPreferences,
           [...fixedEvents, ...lunches]
         );
+        if (!lunchStart) {
+          if (existingLunch?.origin === "aevia") removedLunchIds.add(id);
+          continue;
+        }
         if (existingLunch) {
           if (new Date(existingLunch.start).getTime() !== lunchStart.getTime()) {
             movedLunches.set(id, lunchStart.toISOString());
@@ -687,7 +691,7 @@ export const useStore = create<State>()(persist((set, get) => ({
         .filter(
           (event) =>
             event.taskId === taskId &&
-            !event.cancelled &&
+            isBlockingCalendarEvent(event) &&
             new Date(event.start) >= now
         )
         .reduce((sum, event) => sum + event.durationMinutes, 0);
@@ -763,33 +767,38 @@ export const useStore = create<State>()(persist((set, get) => ({
     return result;
   },
 
-  previewConflictReplan: (eventId) => {
+  previewConflictReplan: (eventId, occurrenceStart) => {
     const { events, tasks, plannerPreferences } = get();
     const addedEvent = events.find((event) => event.id === eventId);
     if (!addedEvent) return null;
-    const addedStart = new Date(addedEvent.start);
-    const addedEnd = new Date(addedStart.getTime() + addedEvent.durationMinutes * 60_000);
-    const overlaps = events.filter((event) => {
-      if (event.id === eventId || event.cancelled) return false;
-      const start = new Date(event.start);
-      const end = new Date(start.getTime() + event.durationMinutes * 60_000);
-      return start < addedEnd && end > addedStart;
-    });
+    const addedStart = occurrenceStart ? new Date(occurrenceStart) : new Date(addedEvent.start);
+    if (!Number.isFinite(addedStart.getTime())) return null;
+    const addedInstance = { ...addedEvent, start: addedStart.toISOString() };
+    const rangeStart = new Date(addedStart);
+    rangeStart.setHours(0, 0, 0, 0);
+    const rangeEnd = addDays(rangeStart, 1);
+    const eventOverlaps = findCalendarOverlaps(events, rangeStart.getTime(), rangeEnd.getTime()).filter((overlap) =>
+      (overlap.first.id === eventId && overlap.firstOccurrenceStart === addedInstance.start) ||
+      (overlap.second.id === eventId && overlap.secondOccurrenceStart === addedInstance.start)
+    );
+    const overlaps = eventOverlaps.map((overlap) => overlap.first.id === eventId ? overlap.second : overlap.first);
     if (overlaps.length === 0) return null;
 
     const conflicts = overlaps.filter((event) =>
       event.kind === "task" && Boolean(event.taskId) && !event.locked && event.origin === "aevia"
     );
     if (conflicts.length === 0) {
-      return { overlaps, conflicts: [], displaced: [], replacements: [], unscheduledTaskTitles: [] };
+      return { overlaps, details: eventOverlaps, conflicts: [], displaced: [], replacements: [], unscheduledTaskTitles: [] };
     }
 
     const now = new Date();
     const targetWeek = weekStart(addedStart);
     const targetWeekEnd = addDays(targetWeek, 7);
+    const conflictedTaskIds = new Set(conflicts.map((event) => event.taskId).filter((id): id is string => Boolean(id)));
     const replaceable = events.filter((event) =>
       event.taskId &&
-      event.kind === "task" && !event.cancelled && !event.locked && event.origin === "aevia" &&
+      conflictedTaskIds.has(event.taskId) &&
+      event.kind === "task" && isBlockingCalendarEvent(event) && !event.locked && event.origin === "aevia" &&
       new Date(event.start) >= targetWeek && new Date(event.start) < targetWeekEnd && new Date(event.start) >= now
     );
     const replaceIds = new Set(replaceable.map((event) => event.id));
@@ -798,19 +807,29 @@ export const useStore = create<State>()(persist((set, get) => ({
     const replannedTasks = tasks.filter((task) => replannedTaskIds.has(task.id) && !task.completed);
     const firstPlan = buildPlan(replannedTasks, stableEvents, plannerPreferences, now, targetWeek);
     const firstUnscheduledIds = new Set(firstPlan.unscheduled);
-    const overlapsAddedEvent = (event: CalendarEvent) => {
-      const start = new Date(event.start);
-      const end = new Date(start.getTime() + event.durationMinutes * 60_000);
-      return start < addedEnd && end > addedStart;
-    };
+    const conflictIds = new Set(conflicts.map((event) => event.id));
     const preservedEvents = replaceable.filter((event) =>
-      firstUnscheduledIds.has(event.taskId!) && !overlapsAddedEvent(event)
+      firstUnscheduledIds.has(event.taskId!) && !conflictIds.has(event.id)
     );
     const preservedIds = new Set(preservedEvents.map((event) => event.id));
     const plan = preservedEvents.length
       ? buildPlan(replannedTasks, [...stableEvents, ...preservedEvents], plannerPreferences, now, targetWeek)
       : firstPlan;
-    const unscheduledIds = new Set(plan.unscheduled);
+    const plannedMinutesByTask = new Map<string, number>();
+    for (const block of plan.blocks) {
+      plannedMinutesByTask.set(block.task.id, (plannedMinutesByTask.get(block.task.id) ?? 0) + block.durationMinutes);
+    }
+    const stableMinutesByTask = new Map<string, number>();
+    for (const event of stableEvents) {
+      if (!isBlockingCalendarEvent(event) || !event.taskId || new Date(event.start) < now) continue;
+      stableMinutesByTask.set(event.taskId, (stableMinutesByTask.get(event.taskId) ?? 0) + event.durationMinutes);
+    }
+    const unscheduledIds = new Set([
+      ...plan.unscheduled,
+      ...replannedTasks.filter((task) =>
+        (plannedMinutesByTask.get(task.id) ?? 0) + (stableMinutesByTask.get(task.id) ?? 0) < task.durationMinutes
+      ).map((task) => task.id),
+    ]);
     const replacements = plan.blocks
       .filter((block) => !unscheduledIds.has(block.task.id))
       .map((block) => ({
@@ -824,10 +843,11 @@ export const useStore = create<State>()(persist((set, get) => ({
         origin: "aevia" as const,
       }));
     const displaced = replaceable.filter((event) =>
-      !preservedIds.has(event.id) && (!unscheduledIds.has(event.taskId!) || overlapsAddedEvent(event))
+      !preservedIds.has(event.id) && !unscheduledIds.has(event.taskId!)
     );
     return {
       overlaps,
+      details: eventOverlaps,
       conflicts,
       displaced,
       replacements,
@@ -836,15 +856,34 @@ export const useStore = create<State>()(persist((set, get) => ({
   },
 
   applyConflictReplan: (proposal) => {
-    const removeIds = new Set(proposal.displaced.map((event) => event.id));
+    let applied = false;
     set((s) => {
+      const currentById = new Map(s.events.map((event) => [event.id, event]));
+      if (proposal.displaced.some((event) => !currentById.has(event.id))) return s;
+      const snapshots = [...proposal.overlaps, ...proposal.displaced, ...proposal.details.flatMap((overlap) => [overlap.first, overlap.second])];
+      if (snapshots.some((snapshot) => {
+        const current = currentById.get(snapshot.id);
+        return !current || current.start !== snapshot.start || current.durationMinutes !== snapshot.durationMinutes || current.title !== snapshot.title || current.kind !== snapshot.kind || current.cancelled !== snapshot.cancelled || current.availability !== snapshot.availability || current.responseStatus !== snapshot.responseStatus || current.locked !== snapshot.locked || current.origin !== snapshot.origin || current.taskId !== snapshot.taskId || current.allDay !== snapshot.allDay;
+      })) return s;
+      const removeIds = new Set(proposal.displaced.map((event) => event.id));
       const usedIds = new Set(s.events.filter((event) => !removeIds.has(event.id)).map((event) => event.id));
       const replacements = proposal.replacements.map((event) => ({
         ...event,
         id: nextEntityId("e", usedIds),
       }));
-      return { events: [...s.events.filter((event) => !removeIds.has(event.id)), ...replacements] };
+      const nextEvents = [...s.events.filter((event) => !removeIds.has(event.id)), ...replacements];
+      const replacementIds = new Set(replacements.map((event) => event.id));
+      const replacementIntervals = replacements.map(calendarEventInterval).filter((interval): interval is { start: number; end: number } => interval !== null);
+      const validationStart = replacementIntervals.length ? Math.min(...replacementIntervals.map((interval) => interval.start)) : 0;
+      const validationEnd = replacementIntervals.length ? Math.max(...replacementIntervals.map((interval) => interval.end)) : 0;
+      const stillConflicts = replacementIntervals.length > 0 && findCalendarOverlaps(nextEvents, validationStart, validationEnd).some((overlap) =>
+        replacementIds.has(overlap.first.id) || replacementIds.has(overlap.second.id)
+      );
+      if (stillConflicts) return s;
+      applied = true;
+      return { events: nextEvents };
     });
+    return applied;
   },
 
   addEvents: (eventsToAdd) => {
@@ -981,7 +1020,7 @@ export const useStore = create<State>()(persist((set, get) => ({
       const task = s.tasks.find((item) => item.id === taskId);
       if (!task) return s;
       const alreadyScheduled = s.events
-        .filter((event) => event.taskId === taskId && !event.cancelled)
+        .filter((event) => event.taskId === taskId && isBlockingCalendarEvent(event))
         .reduce((sum, event) => sum + event.durationMinutes, 0);
       const durationMinutes = Math.min(
         task.durationMinutes - alreadyScheduled,
@@ -1086,7 +1125,7 @@ export const useStore = create<State>()(persist((set, get) => ({
       if (!task) return s;
       const start = makeIsoAt(dayIndex, startMinutes, baseWeekMs ? new Date(baseWeekMs) : weekStart());
       const alreadyScheduled = s.events
-        .filter((event) => event.taskId === taskId && !event.cancelled)
+        .filter((event) => event.taskId === taskId && isBlockingCalendarEvent(event))
         .reduce((sum, event) => sum + event.durationMinutes, 0);
       const durationMinutes = Math.min(
         task.durationMinutes - alreadyScheduled,

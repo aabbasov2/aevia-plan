@@ -15,6 +15,7 @@ import type { CalendarView } from "@/lib/calendar-layout";
 import { planningWeekStart } from "@/lib/planner";
 import { useStore } from "@/lib/store";
 import { weekStart } from "@/lib/time";
+import { GoogleCalendarSyncControl } from "@/components/calendar/GoogleCalendarSyncControl";
 
 const VIEW_LEVELS: CalendarView[] = ["month", "week", "day"];
 
@@ -87,7 +88,7 @@ export function CalendarHeader({
           </button>
           {newMenuOpen && <div className="absolute right-0 top-full z-50 mt-2 w-48 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1 shadow-xl">
             <button className="w-full rounded-lg px-3 py-2 text-left text-[12px] text-fg hover:bg-[var(--surface-2)]" onClick={() => { setNewMenuOpen(false); onAddEvent(); }}>Add event</button>
-            <button className="w-full rounded-lg px-3 py-2 text-left text-[12px] text-fg hover:bg-[var(--surface-2)]" onClick={() => { setNewMenuOpen(false); onImportScreenshot(); }}>Import screenshot</button>
+            <button className="w-full rounded-lg px-3 py-2 text-left text-[12px] text-fg hover:bg-[var(--surface-2)]" onClick={() => { setNewMenuOpen(false); onImportScreenshot(); }}>Import calendar</button>
           </div>}
         </div>
       </div>
@@ -147,12 +148,13 @@ export function CalendarHeader({
             <button className="btn btn-gold h-9 px-3" onClick={() => setNewMenuOpen((open) => !open)} aria-expanded={newMenuOpen}>+ New</button>
             {newMenuOpen && <div className="absolute right-0 top-full z-50 mt-2 w-48 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1 shadow-xl">
               <button className="w-full rounded-lg px-3 py-2 text-left text-[12px] text-fg hover:bg-[var(--surface-2)]" onClick={() => { setNewMenuOpen(false); onAddEvent(); }}>Add event</button>
-              <button className="w-full rounded-lg px-3 py-2 text-left text-[12px] text-fg hover:bg-[var(--surface-2)]" onClick={() => { setNewMenuOpen(false); onImportScreenshot(); }}>Import screenshot</button>
+              <button className="w-full rounded-lg px-3 py-2 text-left text-[12px] text-fg hover:bg-[var(--surface-2)]" onClick={() => { setNewMenuOpen(false); onImportScreenshot(); }}>Import calendar</button>
             </div>}
           </div>
           <button className="btn h-9 px-3" onClick={onPreferences}>
             <SlidersHorizontal size={13} /> Preferences
           </button>
+          <GoogleCalendarSyncControl />
           <button
             className="btn h-9 px-3"
             onClick={() => {

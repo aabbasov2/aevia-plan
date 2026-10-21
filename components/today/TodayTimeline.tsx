@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { CalendarPlus, ChevronLeft, ChevronRight, Clock3, Focus, Plus } from "lucide-react";
+import { AlertTriangle, CalendarPlus, ChevronLeft, ChevronRight, Clock3, Focus, Plus } from "lucide-react";
 import { addDays, format, isSameDay, startOfDay, startOfWeek } from "date-fns";
 import { useStore } from "@/lib/store";
 import { formatHm } from "@/lib/time";
@@ -11,6 +11,7 @@ import type { CalendarEvent } from "@/lib/types";
 import { CalendarEventIdentity, calendarEventAccent } from "@/components/calendar/CalendarEventIdentity";
 import { EventEditorModal } from "@/components/calendar/EventEditorModal";
 import { remainingMilliseconds } from "@/lib/focus-time";
+import { findCalendarOverlaps } from "@/lib/calendar-conflicts";
 
 const DAY_START = 7 * 60;
 const DAY_END = 22 * 60;
@@ -29,7 +30,7 @@ function positionEvents(events: CalendarEvent[], now: Date): PositionedEvent[] {
   const visible = events.filter((event) => {
     const start = new Date(event.start);
     const minute = start.getHours() * 60 + start.getMinutes();
-    const allDay = event.durationMinutes >= 12 * 60;
+    const allDay = event.allDay || event.durationMinutes >= 12 * 60;
     return sameDay(event.start, now) && !allDay && minute < DAY_END && minute + event.durationMinutes > DAY_START;
   }).sort((a, b) => a.start.localeCompare(b.start));
 
@@ -75,11 +76,16 @@ export function TodayTimeline({
 }) {
   const [selectedDate, setSelectedDate] = useState(() => startOfDay(now));
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [showOverlapDetails, setShowOverlapDetails] = useState(false);
   const [view, setView] = useState<CalendarView>("day");
   const events = useStore((s) => s.events);
   const focusSession = useStore((s) => s.focusSession);
   const setFocusModeOpen = useStore((s) => s.setFocusModeOpen);
   const viewingToday = isSameDay(selectedDate, now);
+  const visibleOverlaps = useMemo(() => {
+    const start = view === "week" ? startOfWeek(selectedDate, { weekStartsOn: 1 }) : startOfDay(selectedDate);
+    return findCalendarOverlaps(events, start.getTime(), addDays(start, view === "week" ? 7 : 1).getTime());
+  }, [events, selectedDate, view]);
 
   useEffect(() => {
     // Keep the timeline following the real date when it was left on today overnight.
@@ -90,7 +96,7 @@ export function TodayTimeline({
 
   const { todays, allDay, positioned, nextEvent } = useMemo(() => {
     const dayEvents = events.filter((event) => sameDay(event.start, selectedDate) && !event.cancelled).sort((a, b) => a.start.localeCompare(b.start));
-    const allDayEvents = dayEvents.filter((event) => event.durationMinutes >= 12 * 60);
+    const allDayEvents = dayEvents.filter((event) => event.allDay || event.durationMinutes >= 12 * 60);
     return {
       todays: dayEvents,
       allDay: allDayEvents,
@@ -157,6 +163,20 @@ export function TodayTimeline({
         <span className="min-w-0 flex-1 truncate text-fg">Focus underway{focusSession.taskTitle ? ` · ${focusSession.taskTitle}` : " · open session"}</span>
         <span className="shrink-0 tabular-nums text-fg-muted">{Math.floor(remainingMilliseconds(focusSession, now.getTime()) / 60_000)}m left</span>
         <button type="button" className="shrink-0 text-gold underline-offset-2 hover:underline" onClick={() => setFocusModeOpen(true)}>{focusSession.status === "paused" ? "Return to Focus" : "Open Focus"}</button>
+      </div>}
+
+      {visibleOverlaps.length > 0 && <div className="border-b border-amber-300/20 bg-amber-300/[0.045] px-5 py-2.5 sm:px-6">
+        <button type="button" className="flex w-full items-center gap-2 text-left" aria-expanded={showOverlapDetails} onClick={() => setShowOverlapDetails((open) => !open)}>
+          <AlertTriangle size={13} className="shrink-0 text-amber-200" />
+          <span className="min-w-0 flex-1 text-[10px] text-fg">Aevia flagged {visibleOverlaps.length} calendar overlap{visibleOverlaps.length === 1 ? "" : "s"} · Review schedule</span>
+          <ChevronRight size={13} className={`text-fg-subtle transition-transform ${showOverlapDetails ? "rotate-90" : ""}`} />
+        </button>
+        {showOverlapDetails && <ul className="mt-2 space-y-2">{visibleOverlaps.map((overlap) => <li key={overlap.key} className="rounded-lg border border-[var(--border)] bg-[var(--surface)]/70 px-3 py-2">
+          <p className="text-[9px] text-amber-100">{format(new Date(overlap.start), "EEE, h:mm a")}–{format(new Date(overlap.end), "h:mm a")} · {overlap.severity}</p>
+          <p className="mt-0.5 text-[10px] text-fg">{overlap.first.title} <span className="text-fg-subtle">overlaps</span> {overlap.second.title}</p>
+          <p className="mt-0.5 text-[9px] text-fg-muted">{overlap.recommendation}</p>
+          <div className="mt-1.5 flex gap-2"><button type="button" className="text-[9px] text-gold hover:underline" onClick={() => setSelectedEventId(overlap.first.id)}>Edit {overlap.first.title}</button><button type="button" className="text-[9px] text-gold hover:underline" onClick={() => setSelectedEventId(overlap.second.id)}>Edit {overlap.second.title}</button><Link href="/calendar" className="ml-auto text-[9px] text-gold hover:underline">Open calendar</Link></div>
+        </li>)}</ul>}
       </div>}
 
       {featuredEvent && <button type="button" onClick={() => setSelectedEventId(featuredEvent.id)} className="flex w-full items-center gap-3 border-b border-[var(--border)] bg-[var(--surface-2)]/45 px-5 py-3 text-left transition hover:bg-[var(--surface-2)] sm:px-6">

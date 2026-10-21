@@ -6,6 +6,7 @@ import { ArrowLeft, Eye, EyeOff, LockKeyhole, UserRound } from "lucide-react";
 import { AeviaWordmark } from "@/components/brand/AeviaWordmark";
 import { createClient } from "@/lib/supabase/client";
 import { useProfile } from "@/components/shell/ProfileProvider";
+import { GoogleCalendarSettingsCard } from "@/components/settings/GoogleCalendarSettingsCard";
 
 export default function ChangePasswordPage() {
   const { displayName, loading: profileLoading, saveDisplayName } = useProfile();
@@ -76,6 +77,7 @@ export default function ChangePasswordPage() {
           {nameMessage && <p role="status" className={`rounded-lg border px-3 py-2.5 text-[12px] ${nameMessage.kind === "success" ? "border-emerald-300/20 bg-emerald-300/5 text-emerald-200" : "border-rose-300/20 bg-rose-300/5 text-[#efa2ab]"}`}>{nameMessage.text}</p>}
           <button type="submit" disabled={nameBusy || profileLoading} className="btn h-9">{nameBusy ? "Saving…" : "Save name"}</button>
         </form>
+        <GoogleCalendarSettingsCard />
         <div className="my-7 h-px bg-[var(--border)]" />
         <div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--gold)]/15 text-gold"><LockKeyhole size={18} /></span><div><h2 className="text-[18px] font-medium text-fg">Change password</h2><p className="mt-0.5 text-[12px] text-fg-muted">Verify your current password to continue.</p></div></div>
         <form className="mt-6 space-y-4" onSubmit={submit}>

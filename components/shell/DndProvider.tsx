@@ -141,8 +141,9 @@ export function DndProvider({ children }: { children: ReactNode }) {
               proposal={conflictProposal}
               onDismiss={() => setConflictProposal(null)}
               onApply={() => {
-                applyConflictReplan(conflictProposal);
-                setConflictProposal(null);
+                const applied = applyConflictReplan(conflictProposal);
+                if (applied) setConflictProposal(null);
+                return applied;
               }}
             />
           </div>

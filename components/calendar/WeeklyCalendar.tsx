@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Ban, Clipboard, ClipboardPaste, RotateCcw, Scissors, Trash2 } from "lucide-react";
+import { addDays, endOfMonth, endOfWeek, format, startOfMonth, startOfWeek } from "date-fns";
+import { AlertTriangle, Ban, Clipboard, ClipboardPaste, RotateCcw, Scissors, Trash2, X } from "lucide-react";
 import { CalendarGrid } from "./CalendarGrid";
 import { CalendarHeader } from "./CalendarHeader";
 import { CreateEventModal } from "./CreateEventModal";
@@ -14,6 +15,9 @@ import { CALENDAR_DROP_SLOT_MINUTES, type CalendarView } from "@/lib/calendar-la
 import type { CalendarEvent } from "@/lib/types";
 import { EventEditorModal } from "./EventEditorModal";
 import { CalendarImportModal } from "./CalendarImportModal";
+import { ConflictReplanPanel } from "./ConflictReplanPanel";
+import { findCalendarOverlaps, findCalendarTransitionWarnings } from "@/lib/calendar-conflicts";
+import type { ConflictReplanProposal } from "@/lib/store";
 
 type ClipboardEvent = Omit<CalendarEvent, "id">;
 
@@ -24,12 +28,15 @@ export function WeeklyCalendar() {
   const [eventStart, setEventStart] = useState<Date | null>(null);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [overlapReviewOpen, setOverlapReviewOpen] = useState(false);
+  const [overlapProposal, setOverlapProposal] = useState<ConflictReplanProposal | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [selectedEventIds, setSelectedEventIds] = useState<string[]>([]);
   const [clipboardEvents, setClipboardEvents] = useState<ClipboardEvent[]>([]);
   const [pasteTarget, setPasteTarget] = useState<Date | null>(null);
   const calendarRef = useRef<HTMLDivElement>(null);
   const events = useStore((state) => state.events);
+  const plannerPreferences = useStore((state) => state.plannerPreferences);
   const ensureLunchEvents = useStore((state) => state.ensureLunchEvents);
   const planWeek = useStore((state) => state.planWeek);
   const addEvents = useStore((state) => state.addEvents);
@@ -37,6 +44,8 @@ export function WeeklyCalendar() {
   const updateEvent = useStore((state) => state.updateEvent);
   const deleteEvents = useStore((state) => state.deleteEvents);
   const setEventsCancelled = useStore((state) => state.setEventsCancelled);
+  const previewConflictReplan = useStore((state) => state.previewConflictReplan);
+  const applyConflictReplan = useStore((state) => state.applyConflictReplan);
   const visibleWeek = useMemo(() => weekStart(anchorDate), [anchorDate]);
   const selectedEventSet = useMemo(
     () => new Set(selectedEventIds),
@@ -48,6 +57,26 @@ export function WeeklyCalendar() {
   );
   const allSelectedCancelled =
     selectedEvents.length > 0 && selectedEvents.every((event) => event.cancelled);
+  const visibleRange = useMemo(() => {
+    if (view === "day") {
+      const start = new Date(anchorDate);
+      start.setHours(0, 0, 0, 0);
+      return { start: start.getTime(), end: addDays(start, 1).getTime() };
+    }
+    if (view === "month") return {
+      start: startOfWeek(startOfMonth(anchorDate), { weekStartsOn: 1 }).getTime(),
+      end: addDays(endOfWeek(endOfMonth(anchorDate), { weekStartsOn: 1 }), 1).getTime(),
+    };
+    return { start: visibleWeek.getTime(), end: addDays(visibleWeek, 7).getTime() };
+  }, [anchorDate, view, visibleWeek]);
+  const weekOverlaps = useMemo(
+    () => findCalendarOverlaps(events, visibleRange.start, visibleRange.end),
+    [events, visibleRange]
+  );
+  const transitionWarnings = useMemo(
+    () => findCalendarTransitionWarnings(events, plannerPreferences.bufferMinutes, visibleRange.start, visibleRange.end),
+    [events, plannerPreferences.bufferMinutes, visibleRange]
+  );
 
   const copySelected = useCallback((cut = false) => {
     const copied = events
@@ -246,6 +275,14 @@ export function WeeklyCalendar() {
           onImportScreenshot={() => setImportOpen(true)}
           onPreferences={() => setPreferencesOpen(true)}
         />
+        {(weekOverlaps.length > 0 || transitionWarnings.length > 0) && <div className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-amber-300/25 bg-amber-300/[0.06] px-3.5 py-3">
+          <AlertTriangle size={16} className="shrink-0 text-amber-200" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[12px] font-medium text-fg">{weekOverlaps.length ? `Aevia flagged ${weekOverlaps.length} calendar overlap${weekOverlaps.length === 1 ? "" : "s"}` : "Aevia found tight transitions between calendar blocks"}</p>
+            <p className="mt-0.5 text-[10px] text-fg-muted">{transitionWarnings.length ? `${transitionWarnings.length} block pair${transitionWarnings.length === 1 ? " has" : "s have"} less than your ${plannerPreferences.bufferMinutes}-minute transition buffer.` : "Review the shared times and decide which event to adjust."}</p>
+          </div>
+          <button type="button" className="btn h-8 px-3 text-[11px]" onClick={() => setOverlapReviewOpen(true)}>Review overlaps</button>
+        </div>}
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-fg-subtle">
           <div className="flex items-center gap-3 sm:hidden">
             <span>Swipe across the calendar</span>
@@ -347,6 +384,33 @@ export function WeeklyCalendar() {
         }}
       />
       <EventEditorModal eventId={selectedEventId} onClose={() => setSelectedEventId(null)} />
+      {overlapReviewOpen && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[var(--overlay)] p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setOverlapReviewOpen(false); }}>
+        <section role="dialog" aria-modal="true" aria-labelledby="calendar-overlap-title" className="card-raised max-h-[80vh] w-full max-w-xl overflow-y-auto p-5 sm:p-6">
+          {overlapProposal ? <ConflictReplanPanel
+            proposal={overlapProposal}
+            onDismiss={() => setOverlapProposal(null)}
+            onApply={() => { const applied = applyConflictReplan(overlapProposal); if (applied) setOverlapProposal(null); return applied; }}
+          /> : <>
+            <div className="flex items-start justify-between gap-4">
+              <div><div className="wordmark text-[10px] text-amber-200">AEVIA SCHEDULE CHECK</div><h2 id="calendar-overlap-title" className="display mt-1 text-xl text-fg">Overlapping events</h2><p className="mt-1 text-xs leading-5 text-fg-muted">Aevia detected these shared time ranges. It can reflow flexible Aevia task blocks; fixed events stay where you placed them.</p></div>
+              <button type="button" className="btn h-8 w-8 shrink-0 p-0" onClick={() => setOverlapReviewOpen(false)} aria-label="Close overlap review"><X size={14} /></button>
+            </div>
+            <ul className="mt-4 space-y-2">
+              {weekOverlaps.map((overlap) => {
+                const flexibleTask = [overlap.first, overlap.second].find((event) => event.origin === "aevia" && event.kind === "task" && Boolean(event.taskId) && !event.locked);
+                const fixedEvent = flexibleTask?.id === overlap.first.id ? overlap.second : overlap.first;
+                return <li key={overlap.key} className="rounded-xl border border-amber-300/15 bg-amber-300/[0.04] p-3">
+                  <p className="text-[10px] text-amber-100">{format(new Date(overlap.start), "EEE, MMM d · h:mm a")}–{format(new Date(overlap.end), "h:mm a")}</p>
+                  <p className="mt-1 text-xs text-fg">{overlap.first.title} <span className="text-fg-subtle">overlaps</span> {overlap.second.title} <span className="ml-1 text-[9px] uppercase tracking-wide text-amber-100">{overlap.severity} · {overlap.type.replaceAll("-", " ")}</span></p>
+                  <p className="mt-1 text-[10px] text-fg-muted">{overlap.recommendation}</p>
+                  <div className="mt-2 flex flex-wrap gap-2"><button type="button" className="btn h-7 px-2 text-[10px]" onClick={() => { setOverlapReviewOpen(false); setSelectedEventId(overlap.first.id); }}>Edit {overlap.first.title}</button><button type="button" className="btn h-7 px-2 text-[10px]" onClick={() => { setOverlapReviewOpen(false); setSelectedEventId(overlap.second.id); }}>Edit {overlap.second.title}</button>{flexibleTask && <button type="button" className="btn btn-gold h-7 px-2 text-[10px]" onClick={() => { const fixedOccurrence = fixedEvent.id === overlap.first.id ? overlap.firstOccurrenceStart : overlap.secondOccurrenceStart; const proposal = previewConflictReplan(fixedEvent.id, fixedOccurrence); if (proposal) setOverlapProposal(proposal); }}>Ask Aevia to replan</button>}</div>
+                </li>;
+              })}
+            </ul>
+            {transitionWarnings.length > 0 && <div className="mt-3 border-t border-[var(--border)] pt-3"><p className="wordmark text-[9px] text-fg-subtle">SHORT TRANSITIONS · NOT OVERLAPS</p><ul className="mt-2 space-y-1.5">{transitionWarnings.map((warning) => <li key={warning.key} className="text-[10px] text-fg-muted">{warning.first.title} → {warning.second.title}: {warning.gapMinutes} min between blocks</li>)}</ul></div>}
+          </>}
+        </section>
+      </div>}
     </>
   );
 }
@@ -363,6 +427,10 @@ function toClipboardEvent(event: CalendarEvent): ClipboardEvent {
     colorIndex: event.colorIndex,
     locked: event.locked,
     cancelled: event.cancelled,
+    allDay: event.allDay,
+    availability: event.availability,
+    responseStatus: event.responseStatus,
+    recurrence: event.recurrence,
   };
 }
 

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { addDays, format, startOfDay } from "date-fns";
-import { AlertTriangle, ArrowUpRight, CalendarDays, CheckCircle2, RotateCcw, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, CalendarDays, Clock3, RotateCcw, Trash2, X } from "lucide-react";
 import { AeviaArc } from "@/components/brand/AeviaArc";
 import { DayRecoveryModal } from "@/components/aevia/DayRecoveryModal";
 import { useStore } from "@/lib/store";
@@ -10,6 +11,7 @@ import type { CalendarEvent, ProjectKey, Task } from "@/lib/types";
 import { PROJECTS } from "@/lib/projects";
 import { weekStart } from "@/lib/time";
 import { buildPlan, planningWeekStart } from "@/lib/planner";
+import { calendarEventInterval, findCalendarOverlaps, isBlockingCalendarEvent } from "@/lib/calendar-conflicts";
 
 type PlanPreview = {
   targetWeek: Date;
@@ -29,11 +31,15 @@ type CommandResult = {
   eventStartTime?: string;
   eventDurationMinutes?: number;
   eventKind?: "meeting" | "task" | "focus";
+  scheduleImmediately?: boolean;
+  taskTitle?: string;
+  taskDurationMinutes?: number;
   clarification?: string;
   response?: string;
 };
 
-type TaskProposal = { type: "task"; title: string; durationMinutes: number; deadlineDate: string; project: ProjectKey; sessionMinutes: number; splitIntoSessions: boolean };
+type TaskProposal = { type: "task"; title: string; durationMinutes: number; deadlineDate: string; project: ProjectKey; sessionMinutes: number; splitIntoSessions: boolean; scheduleImmediately?: boolean };
+type TaskBatchProposal = { type: "task_batch"; title: string; count: number; durationMinutes: number; deadlineDate: string; project: ProjectKey; sessionMinutes: number; splitIntoSessions: boolean };
 type EventProposal = { type: "event"; title: string; start: Date; durationMinutes: number; kind: "meeting" | "task" | "focus" };
 
 function localDateString(date: Date) {
@@ -65,31 +71,19 @@ function summarizePeriod(tasks: Task[], events: CalendarEvent[], start: Date, en
 }
 
 function riskSummary(tasks: Task[], events: CalendarEvent[], start: Date, end: Date, label: string) {
-  const conflicts: Array<[CalendarEvent, CalendarEvent]> = [];
-  const rangeEvents = eventsInRange(events, start, end).sort((a, b) => a.start.localeCompare(b.start));
-  for (let i = 0; i < rangeEvents.length; i += 1) {
-    const first = rangeEvents[i];
-    const firstStart = new Date(first.start).getTime();
-    const firstEnd = firstStart + first.durationMinutes * 60_000;
-    for (let j = i + 1; j < rangeEvents.length; j += 1) {
-      const second = rangeEvents[j];
-      const secondStart = new Date(second.start).getTime();
-      if (secondStart >= firstEnd) break;
-      if (secondStart + second.durationMinutes * 60_000 > firstStart) conflicts.push([first, second]);
-    }
-  }
+  const conflicts = findCalendarOverlaps(events, start.getTime(), end.getTime());
 
   const atRisk = tasks.filter((task) => {
     if (task.completed || !task.deadline) return false;
     const due = new Date(task.deadline);
     if (due < start || due >= end) return false;
-    const scheduled = events.filter((event) => event.taskId === task.id && !event.cancelled && new Date(event.start) < addDays(startOfDay(due), 1)).reduce((sum, event) => sum + event.durationMinutes, 0);
+    const scheduled = events.filter((event) => event.taskId === task.id && isBlockingCalendarEvent(event) && new Date(event.start) < addDays(startOfDay(due), 1)).reduce((sum, event) => sum + event.durationMinutes, 0);
     return scheduled < task.durationMinutes;
   });
 
   if (atRisk.length === 0 && conflicts.length === 0) return `${label}: no unscheduled deadline work or calendar overlaps found.`;
   const taskText = atRisk.length ? `${atRisk.length} task${atRisk.length === 1 ? "" : "s"} still need time (${atRisk.slice(0, 3).map((task) => task.title).join(", ")}${atRisk.length > 3 ? ", …" : ""})` : "no deadline tasks need extra time";
-  const conflictText = conflicts.length ? `${conflicts.length} calendar overlap${conflicts.length === 1 ? "" : "s"} (${conflicts.slice(0, 2).map(([a, b]) => `${a.title} / ${b.title}`).join(", ")})` : "no calendar overlaps";
+  const conflictText = conflicts.length ? `${conflicts.length} calendar overlap${conflicts.length === 1 ? "" : "s"} (${conflicts.slice(0, 2).map(({ first, second }) => `${first.title} / ${second.title}`).join(", ")})` : "no calendar overlaps";
   return `${label}: ${taskText}; ${conflictText}.`;
 }
 
@@ -102,11 +96,10 @@ function availabilitySummary(events: CalendarEvent[], preferences: { workStartMi
     const workEnd = new Date(day);
     workEnd.setMinutes(preferences.workEndMinutes, 0, 0);
     const busy = events
-      .filter((event) => !event.cancelled)
-      .map((event) => {
-        const eventStart = new Date(event.start);
-        const eventEnd = new Date(eventStart.getTime() + event.durationMinutes * 60_000);
-        return { start: new Date(eventStart.getTime() - preferences.bufferMinutes * 60_000), end: new Date(eventEnd.getTime() + preferences.bufferMinutes * 60_000) };
+      .filter(isBlockingCalendarEvent)
+      .flatMap((event) => {
+        const interval = calendarEventInterval(event);
+        return interval ? [{ start: new Date(interval.start - preferences.bufferMinutes * 60_000), end: new Date(interval.end + preferences.bufferMinutes * 60_000) }] : [];
       })
       .filter((event) => event.start < workEnd && event.end > workStart)
       .sort((a, b) => a.start.getTime() - b.start.getTime());
@@ -122,32 +115,62 @@ function availabilitySummary(events: CalendarEvent[], preferences: { workStartMi
   return `${label}: ${slots.slice(0, 4).map((slot) => `${format(slot.start, "EEE HH:mm")}–${format(slot.end, "HH:mm")}`).join(" · ")}${slots.length > 4 ? ` · +${slots.length - 4} more` : ""}.`;
 }
 
-export function TodayCommandPanel({ onStartFocus }: { onStartFocus?: (taskId: string, durationMinutes: number, eventId: string) => void }) {
+export function TodayCommandPanel({ onStartFocus, presentation = "inline" }: { onStartFocus?: (taskId: string, durationMinutes: number, eventId: string) => void; presentation?: "inline" | "window" }) {
   const tasks = useStore((state) => state.tasks);
   const events = useStore((state) => state.events);
   const preferences = useStore((state) => state.plannerPreferences);
   const commitPlanPreview = useStore((state) => state.applyPlanPreview);
   const messages = useStore((state) => state.assistantMessages);
   const appendAssistantMessage = useStore((state) => state.appendAssistantMessage);
+  const clearAssistantMessages = useStore((state) => state.clearAssistantMessages);
   const markEventPromptAsked = useStore((state) => state.markEventPromptAsked);
   const respondToEventPrompt = useStore((state) => state.respondToEventPrompt);
   const toggleComplete = useStore((state) => state.toggleComplete);
   const createTask = useStore((state) => state.createTask);
   const createEvent = useStore((state) => state.createEvent);
+  const scheduleUnscheduledTask = useStore((state) => state.scheduleUnscheduledTask);
   const setEventKind = useStore((state) => state.setEventKind);
   const [request, setRequest] = useState("");
-  const [actionProposal, setActionProposal] = useState<TaskProposal | EventProposal | null>(null);
+  const [actionProposal, setActionProposal] = useState<TaskProposal | TaskBatchProposal | EventProposal | null>(null);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [recoveryDescription, setRecoveryDescription] = useState("");
   const [planPreview, setPlanPreview] = useState<PlanPreview | null>(null);
   const [busy, setBusy] = useState(false);
+  const [arcState, setArcState] = useState<"idle" | "thinking" | "finished" | "error">("idle");
+  const [windowOpen, setWindowOpen] = useState(false);
   const [promptNow, setPromptNow] = useState(() => Date.now());
   const proactiveSuggestionKey = useRef("");
   const conversationRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const arcStateTimer = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (arcStateTimer.current !== null) window.clearTimeout(arcStateTimer.current);
+  }, []);
+
+  useEffect(() => {
+    if (!windowOpen || presentation !== "window") return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setWindowOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [windowOpen, presentation]);
 
   function addAssistantMessage(content: string) {
     const clean = content.trim();
     if (clean) appendAssistantMessage({ role: "assistant", content: clean });
+  }
+
+  function clearConversation() {
+    if (!messages.length || !window.confirm("Clear all messages in Aevia AI?")) return;
+    clearAssistantMessages();
+    setRequest("");
+    setActionProposal(null);
+    setPlanPreview(null);
+    setRecoveryDescription("");
+    setRecoveryOpen(false);
+    setArcState("idle");
   }
 
   useEffect(() => {
@@ -221,8 +244,11 @@ export function TodayCommandPanel({ onStartFocus }: { onStartFocus?: (taskId: st
     if (!message || busy) return;
     setRequest("");
     setBusy(true);
+    if (arcStateTimer.current !== null) window.clearTimeout(arcStateTimer.current);
+    setArcState("thinking");
     setPlanPreview(null);
     appendAssistantMessage({ role: "user", content: message });
+    let failed = false;
     try {
       const now = new Date();
       const response = await fetch("/api/ai/interpret-command", {
@@ -250,10 +276,30 @@ export function TodayCommandPanel({ onStartFocus }: { onStartFocus?: (taskId: st
       switch (command.intent) {
         case "create_task":
           {
+            if (command.scheduleImmediately && command.taskTitle && command.taskDurationMinutes) {
+              const durationMinutes = command.taskDurationMinutes;
+              setActionProposal({
+                type: "task",
+                title: command.taskTitle,
+                durationMinutes,
+                deadlineDate: "",
+                project: "work",
+                sessionMinutes: Math.min(durationMinutes, 120),
+                splitIntoSessions: durationMinutes > 120,
+                scheduleImmediately: true,
+              });
+              addAssistantMessage(`I’ve prepared “${command.taskTitle}” for ${durationMinutes} minutes. Accept once and I’ll add it to Tasks and find an open slot.`);
+              break;
+            }
             const taskResponse = await fetch("/api/ai/interpret-task", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ message, today: localDateString(now), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
+              body: JSON.stringify({
+                message,
+                history: messages.slice(-12).map((entry) => ({ role: entry.role === "assistant" ? "model" : "user", content: entry.content })),
+                today: localDateString(now),
+                timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+              }),
             });
             const taskData = await taskResponse.json();
             if (!taskResponse.ok) throw new Error(taskData.error ?? "Aevia couldn't prepare that task.");
@@ -261,8 +307,14 @@ export function TodayCommandPanel({ onStartFocus }: { onStartFocus?: (taskId: st
               addAssistantMessage(taskData.clarification || "How much time do you expect this task to take?");
               break;
             }
-            setActionProposal({ type: "task", title: taskData.title, durationMinutes: taskData.durationMinutes, deadlineDate: taskData.deadlineDate, project: taskData.project, sessionMinutes: taskData.sessionMinutes, splitIntoSessions: taskData.splitIntoSessions });
-            addAssistantMessage("I’ve prepared this task. Review the details below and accept to add it.");
+            setActionProposal(taskData.taskCount > 1
+              ? { type: "task_batch", title: taskData.title, count: taskData.taskCount, durationMinutes: taskData.durationMinutes, deadlineDate: taskData.deadlineDate, project: taskData.project, sessionMinutes: taskData.sessionMinutes, splitIntoSessions: taskData.splitIntoSessions }
+              : { type: "task", title: taskData.title, durationMinutes: taskData.durationMinutes, deadlineDate: taskData.deadlineDate, project: taskData.project, sessionMinutes: taskData.sessionMinutes, splitIntoSessions: taskData.splitIntoSessions, scheduleImmediately: command.scheduleImmediately });
+            addAssistantMessage(taskData.taskCount > 1
+              ? `I’ve prepared ${taskData.taskCount} separate tasks. Review the batch below and accept to add them.`
+              : command.scheduleImmediately
+                ? "I’ve prepared the task and will place it in the next suitable open slot when you accept."
+                : "I’ve prepared this task. Review the details below and accept to add it.");
           }
           break;
         case "create_event": {
@@ -300,9 +352,14 @@ export function TodayCommandPanel({ onStartFocus }: { onStartFocus?: (taskId: st
           break;
       }
     } catch (error) {
+      failed = true;
       addAssistantMessage(error instanceof Error ? error.message : "Aevia couldn't understand that request. Try again.");
     } finally {
       setBusy(false);
+      if (arcStateTimer.current !== null) window.clearTimeout(arcStateTimer.current);
+      const finalState = failed ? "error" : "finished";
+      setArcState(finalState);
+      arcStateTimer.current = window.setTimeout(() => setArcState("idle"), finalState === "finished" ? 1200 : 1500);
     }
   }
 
@@ -369,19 +426,34 @@ export function TodayCommandPanel({ onStartFocus }: { onStartFocus?: (taskId: st
 
   function acceptActionProposal() {
     if (!actionProposal) return;
-    if (actionProposal.type === "task") {
+    if (actionProposal.type === "task" || actionProposal.type === "task_batch") {
       const deadline = actionProposal.deadlineDate ? new Date(`${actionProposal.deadlineDate}T23:59:59`).toISOString() : undefined;
-      createTask({
-        title: actionProposal.title,
-        durationMinutes: actionProposal.durationMinutes,
-        focusBlockMinutes: actionProposal.sessionMinutes,
-        splitPreference: actionProposal.splitIntoSessions,
-        ...(deadline ? { deadline } : {}),
-        recurrence: { kind: "none" },
-        project: actionProposal.project,
-        colorIndex: 3,
-      }, { autoSchedule: false });
-      addAssistantMessage(`Added “${actionProposal.title}” to Tasks. You can ask me to find time for it whenever you’re ready.`);
+      const count = actionProposal.type === "task_batch" ? actionProposal.count : 1;
+      const createdTaskIds: string[] = [];
+      for (let index = 0; index < count; index += 1) {
+        const taskId = createTask({
+          title: count > 1 ? `${actionProposal.title} ${index + 1}` : actionProposal.title,
+          durationMinutes: actionProposal.durationMinutes,
+          focusBlockMinutes: actionProposal.sessionMinutes,
+          splitPreference: actionProposal.splitIntoSessions,
+          ...(deadline ? { deadline } : {}),
+          recurrence: { kind: "none" },
+          project: actionProposal.project,
+          colorIndex: 3,
+        }, { autoSchedule: false });
+        createdTaskIds.push(taskId);
+      }
+      if (count === 1 && actionProposal.type === "task" && actionProposal.scheduleImmediately) {
+        const result = scheduleUnscheduledTask(createdTaskIds[0]);
+        const scheduledEvent = useStore.getState().events.find((event) => event.taskId === createdTaskIds[0] && !event.cancelled);
+        addAssistantMessage(result.scheduled && scheduledEvent
+          ? `Added “${actionProposal.title}” to Tasks and scheduled it for ${format(new Date(scheduledEvent.start), "EEEE, MMM d 'at' HH:mm")}.`
+          : `Added “${actionProposal.title}” to Tasks. I couldn’t find a suitable open slot this week, so it remains unscheduled.`);
+      } else {
+        addAssistantMessage(count > 1
+          ? `Added ${count} tasks to Tasks. I’m preparing a schedule preview for the week before the deadline.`
+          : `Added “${actionProposal.title}” to Tasks. You can ask me to find time for it whenever you’re ready.`);
+      }
     } else {
       const result = createEvent({
         title: actionProposal.title,
@@ -393,7 +465,12 @@ export function TodayCommandPanel({ onStartFocus }: { onStartFocus?: (taskId: st
         colorIndex: 4,
       });
       if (actionProposal.kind === "task" && result.eventId) setEventKind(result.eventId, "task");
-      addAssistantMessage(`Added “${actionProposal.title}” to your calendar.`);
+      const createdEvent = result.eventId ? useStore.getState().events.find((event) => event.id === result.eventId) : undefined;
+      const createdStart = createdEvent ? new Date(createdEvent.start).getTime() : 0;
+      const overlaps = createdEvent ? findCalendarOverlaps(useStore.getState().events, createdStart, createdStart + createdEvent.durationMinutes * 60_000).filter((overlap) => overlap.first.id === result.eventId || overlap.second.id === result.eventId) : [];
+      addAssistantMessage(overlaps.length
+        ? `Added “${actionProposal.title}” to your calendar. Aevia flagged ${overlaps.length} overlap${overlaps.length === 1 ? "" : "s"}; review the recommendation in Today.`
+        : `Added “${actionProposal.title}” to your calendar.`);
     }
     setActionProposal(null);
   }
@@ -404,61 +481,92 @@ export function TodayCommandPanel({ onStartFocus }: { onStartFocus?: (taskId: st
     addAssistantMessage(riskSummary(tasks, events, start, addDays(start, 7), dateRangeLabel(start, addDays(start, 6))));
   }
 
-  return <>
-    <section className="today-card overflow-hidden rounded-2xl">
-      <div className="flex items-center gap-3 border-b border-[var(--border)] px-5 py-4 sm:px-6">
-        <AeviaArc size={23} />
-        <div className="min-w-0 flex-1"><h2 className="text-[17px] font-medium text-fg">Aevia AI</h2><p className="text-[10px] text-fg-subtle">Your schedule, in context</p></div>
-        <span className="flex items-center gap-1 text-[10px] text-fg-subtle"><span className={`h-1.5 w-1.5 rounded-full ${busy ? "animate-pulse bg-gold" : "bg-emerald-400"}`} />{busy ? "Thinking…" : "Ready"}</span>
+  function choosePrompt(prompt: string) {
+    setRequest(prompt);
+    window.requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
+  const welcomePrompts = [
+    { label: "Plan my day", description: "Build a balanced schedule", icon: <CalendarDays size={15} />, prompt: "Plan my day" },
+    { label: "Find time for a task", description: "Fit focused work into your week", icon: <Clock3 size={15} />, prompt: "Find time for a task" },
+    { label: "Check for conflicts", description: "Review overlaps and risks", icon: <AlertTriangle size={15} />, prompt: "Check my calendar for conflicts this week" },
+    { label: "Prepare for next week", description: "See what can fit ahead", icon: <RotateCcw size={15} />, prompt: "Plan my tasks for next week" },
+  ];
+
+  if (presentation === "window" && !windowOpen) {
+    return <>
+      <button type="button" onClick={() => setWindowOpen(true)} className="fixed bottom-5 right-5 z-40 inline-flex h-12 items-center gap-2.5 rounded-full border border-[#dfc08c]/30 bg-[#171513]/95 px-4 text-[12px] font-medium text-[#f0e6d7] shadow-[0_10px_36px_rgba(0,0,0,.45)] backdrop-blur-xl transition hover:border-[#dfc08c]/60 hover:bg-[#211e19] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#dfc08c]">
+        <AeviaArc size={22} /> Aevia AI <span className="sr-only">Open assistant window</span>
+      </button>
+      <DayRecoveryModal open={recoveryOpen} onOpenChange={setRecoveryOpen} initialDescription={recoveryDescription} />
+    </>;
+  }
+
+  const panel = <section
+    role={presentation === "window" ? "dialog" : undefined}
+    aria-modal={presentation === "window" ? true : undefined}
+    aria-labelledby="aevia-ai-title"
+    className={presentation === "window"
+      ? "fixed inset-y-3 right-3 z-[61] flex w-[min(500px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-[22px] border border-white/[0.12] bg-[linear-gradient(155deg,rgba(23,22,21,.98),rgba(12,13,16,.98)_68%)] text-fg shadow-[0_28px_100px_rgba(0,0,0,.65)] backdrop-blur-2xl sm:inset-y-5 sm:right-5 sm:w-[min(520px,calc(100vw-2.5rem))]"
+      : "today-card overflow-hidden rounded-2xl"}
+  >
+      <div className="flex shrink-0 items-center gap-3 border-b border-white/[0.09] px-5 py-4 sm:px-6">
+        <AeviaArc size={28} state={busy ? "thinking" : arcState} />
+        <div className="min-w-0 flex-1"><h2 id="aevia-ai-title" className="text-[17px] font-medium text-[#f2eadd]">Aevia AI</h2><p className="text-[10px] text-white/45">Your planning assistant</p></div>
+        <span aria-live="polite" className={`text-[10px] ${arcState === "error" ? "text-[#c98c82]" : "text-white/40"}`}>{busy ? "Thinking…" : arcState === "error" ? "Couldn't respond" : arcState === "finished" ? "Responded" : "Ready"}</span>
+        {messages.length > 0 && <button type="button" onClick={clearConversation} disabled={busy} className="ml-1 inline-flex h-8 items-center gap-1.5 rounded-full px-2 text-white/45 transition hover:bg-white/[0.07] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-35" aria-label="Clear Aevia AI conversation" title={busy ? "Wait for Aevia to finish before clearing" : "Clear conversation"}><Trash2 size={14} /><span className="hidden text-[10px] sm:inline">Clear</span></button>}
+        {presentation === "window" && <button type="button" onClick={() => setWindowOpen(false)} className="ml-1 inline-flex h-8 w-8 items-center justify-center rounded-full text-white/55 transition hover:bg-white/[0.08] hover:text-white" aria-label="Close Aevia AI"><X size={16} /></button>}
       </div>
-      <div className="p-5 sm:p-6">
-        <div ref={conversationRef} className="max-h-[360px] space-y-3 overflow-y-auto pr-1" aria-live="polite">
-          {messages.length === 0 && <div className="inline-flex max-w-full items-start gap-2 rounded-xl rounded-tl-sm bg-[var(--surface-2)] px-3.5 py-3 text-[12px] leading-5 text-fg-muted"><Sparkles size={14} className="mt-0.5 shrink-0 text-gold" />What would you like help with?</div>}
+      <div className={presentation === "window" ? "flex min-h-0 flex-1 flex-col px-4 pb-4 pt-4 sm:px-5" : "p-5 sm:p-6"}>
+        <div ref={conversationRef} className={presentation === "window" ? "min-h-0 flex-1 space-y-3 overflow-y-auto px-0.5 pb-4" : "max-h-[360px] space-y-3 overflow-y-auto pr-1"} aria-live="polite">
+          {messages.length === 0 && <div className="flex min-h-full flex-col justify-center py-5">
+            <div className="mx-auto flex max-w-[350px] flex-col items-center text-center">
+              <AeviaArc size={54} className="mb-5" />
+              <h3 className="serif text-[25px] leading-tight text-[#f0e6d7]">How can I help you today?</h3>
+              <p className="mt-2 max-w-[310px] text-[12px] leading-5 text-white/50">Plan, resolve conflicts, and find time for what matters.</p>
+            </div>
+            <div className="mx-auto mt-8 grid w-full max-w-[390px] grid-cols-1 gap-2 sm:grid-cols-2">
+              {welcomePrompts.map((item) => <button key={item.label} type="button" onClick={() => item.label === "Plan my day" ? planToday() : item.label === "Check for conflicts" ? showRisks() : choosePrompt(item.prompt)} className="group flex min-h-[58px] items-center gap-3 rounded-xl border border-white/[0.09] bg-white/[0.025] px-3.5 py-2.5 text-left transition hover:border-[#dfc08c]/35 hover:bg-[#dfc08c]/[0.06]">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#dfc08c]/15 bg-[#dfc08c]/[0.07] text-[#e8c68f]">{item.icon}</span>
+                <span className="min-w-0"><span className="block text-[11px] font-medium text-white/85">{item.label}</span><span className="mt-0.5 block text-[9px] leading-4 text-white/40">{item.description}</span></span>
+                <ArrowUpRight size={13} className="ml-auto shrink-0 text-white/25 transition group-hover:text-[#e8c68f]" />
+              </button>)}
+            </div>
+          </div>}
           {messages.map((message) => <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
-            <div className={`max-w-[92%] whitespace-pre-wrap rounded-xl px-3.5 py-3 text-[12px] leading-5 ${message.role === "user" ? "rounded-tr-sm bg-[var(--gold-soft)] text-fg" : "rounded-tl-sm bg-[var(--surface-2)] text-fg-muted"}`}>{message.role === "assistant" && <Sparkles size={13} className="mr-1.5 inline text-gold" />}{message.content}</div>
+            <div className={`max-w-[92%] whitespace-pre-wrap rounded-[16px] px-3.5 py-3 text-[12px] leading-[1.65] ${message.role === "user" ? "rounded-tr-[5px] border border-white/[0.06] bg-white/[0.09] text-[#f0e8dd]" : "rounded-tl-[5px] border border-white/[0.045] bg-[#111216]/90 text-white/65"}`}>{message.role === "assistant" && <AeviaArc size={12} className="mr-1.5 inline align-[-2px]" />}{message.content}</div>
           </div>)}
-          {actionProposal && <div className="max-w-[96%] overflow-hidden rounded-xl border border-[var(--gold)]/30 bg-[var(--surface)]" aria-live="polite">
-            <div className="flex items-start gap-2 border-b border-[var(--border)] px-3.5 py-3"><Sparkles size={14} className="mt-0.5 shrink-0 text-gold" /><div><p className="text-[12px] font-medium text-fg">Review proposed {actionProposal.type === "task" ? "task" : "calendar event"}</p><p className="mt-0.5 text-[10px] text-fg-muted">Accept to add it to Aevia.</p></div></div>
-            <div className="space-y-1.5 px-3.5 py-3 text-[11px]"><p className="font-medium text-fg">{actionProposal.title}</p>
-              {actionProposal.type === "task" ? <><p className="text-fg-muted">Task · {actionProposal.durationMinutes} min · {PROJECTS[actionProposal.project].label}</p>{actionProposal.deadlineDate && <p className="text-fg-muted">Due {format(new Date(`${actionProposal.deadlineDate}T12:00:00`), "EEE, MMM d, yyyy")}</p>}</>
-                : <><p className="text-fg-muted">{actionProposal.kind[0].toUpperCase() + actionProposal.kind.slice(1)} · {format(actionProposal.start, "EEE, MMM d · HH:mm")} · {actionProposal.durationMinutes} min</p>{(() => {
-                  const proposedEnd = actionProposal.start.getTime() + actionProposal.durationMinutes * 60_000;
-                  const overlaps = events.filter((item) => !item.cancelled && new Date(item.start).getTime() < proposedEnd && new Date(item.start).getTime() + item.durationMinutes * 60_000 > actionProposal.start.getTime());
-                  return overlaps.length ? <p className="text-[#e6a07d]">Overlaps with {overlaps.map((item) => item.title).join(", ")}</p> : null;
+          {actionProposal && <div className="mx-1 overflow-hidden rounded-2xl border border-[#e5c58e]/20 bg-[#111216]/85 shadow-[0_12px_40px_rgba(0,0,0,.2)]" aria-live="polite">
+            <div className="flex items-start gap-2 border-b border-white/[0.07] px-4 py-3.5"><AeviaArc size={17} className="mt-0.5" /><div><p className="text-[12px] font-medium text-[#f0e6d7]">Review proposed {actionProposal.type === "task_batch" ? `${actionProposal.count} tasks` : actionProposal.type === "task" ? "task" : "calendar event"}</p><p className="mt-0.5 text-[10px] text-white/45">Accept to add it to Aevia.</p></div></div>
+            <div className="space-y-2 px-4 py-3.5 text-[11px]"><p className="font-medium text-[#f2eadd]">{actionProposal.title}</p>
+              {actionProposal.type === "task" || actionProposal.type === "task_batch" ? <><p className="text-white/55">{actionProposal.type === "task_batch" ? `${actionProposal.count} tasks · ` : "Task · "}{actionProposal.durationMinutes} min{actionProposal.type === "task_batch" ? ` each · ${Math.round(actionProposal.count * actionProposal.durationMinutes / 60 * 10) / 10}h total` : ""} · {PROJECTS[actionProposal.project].label}</p>{actionProposal.type === "task_batch" && <div className="max-h-28 overflow-y-auto rounded-lg border border-white/[0.07] px-2.5 py-1 text-[10px] text-white/55">{Array.from({ length: actionProposal.count }, (_, index) => <p key={index} className="py-1">{actionProposal.title} {index + 1}</p>)}</div>}{actionProposal.deadlineDate && <p className="text-white/55">Due {format(new Date(`${actionProposal.deadlineDate}T12:00:00`), "EEE, MMM d, yyyy")}</p>}{actionProposal.type === "task" && actionProposal.scheduleImmediately && <p className="text-[#e5c58e]">Add to Tasks and schedule in the next suitable open slot</p>}</>
+                : <><p className="text-white/55">{actionProposal.kind[0].toUpperCase() + actionProposal.kind.slice(1)} · {format(actionProposal.start, "EEE, MMM d · HH:mm")} · {actionProposal.durationMinutes} min</p>{(() => {
+                  const proposed: CalendarEvent = { id: "proposed-ai-event", title: actionProposal.title, start: actionProposal.start.toISOString(), durationMinutes: actionProposal.durationMinutes, kind: actionProposal.kind, origin: "user" };
+                  const overlaps = findCalendarOverlaps([...events, proposed], actionProposal.start.getTime(), actionProposal.start.getTime() + actionProposal.durationMinutes * 60_000).filter((overlap) => overlap.first.id === proposed.id || overlap.second.id === proposed.id);
+                  return overlaps.length ? <div className="rounded-xl border border-[#d77968]/20 bg-[#a54034]/[0.1] px-3 py-2.5 text-[10px] text-[#e6b2a4]"><p>Aevia flagged {overlaps.length} overlap{overlaps.length === 1 ? "" : "s"}. This event will be added at the time you requested.</p>{overlaps.map((overlap) => <p key={overlap.key} className="mt-1.5">{overlap.first.title} / {overlap.second.title} · {format(new Date(overlap.start), "HH:mm")}–{format(new Date(overlap.end), "HH:mm")} · {overlap.recommendation}</p>)}</div> : null;
                 })()}</>}
             </div>
-            <div className="flex justify-end gap-2 border-t border-[var(--border)] px-3.5 py-2.5"><button type="button" className="btn h-7 px-2.5 text-[10px]" onClick={() => setActionProposal(null)}>Dismiss</button><button type="button" className="btn btn-gold h-7 px-2.5 text-[10px]" onClick={acceptActionProposal}>Accept and add</button></div>
+            <div className="flex justify-end gap-2 border-t border-white/[0.07] px-4 py-3"><button type="button" className="btn h-8 px-3 text-[10px]" onClick={() => setActionProposal(null)}>Dismiss</button><button type="button" className="btn btn-gold h-8 px-3 text-[10px]" onClick={acceptActionProposal}>Accept and add <ArrowUpRight size={12} /></button></div>
           </div>}
-          {pendingEventPrompts.map(({ type, event, task }) => <div key={`${type}-${event.id}`} className="max-w-[92%] rounded-xl rounded-tl-sm border border-[var(--gold)]/25 bg-[var(--surface-2)] px-3.5 py-3 text-[12px] leading-5 text-fg">
-            <div className="flex items-start gap-2"><Sparkles size={13} className="mt-1 shrink-0 text-gold" /><p>{type === "focus" ? `Focus block · ${task.title} at ${format(new Date(event.start), "HH:mm")}` : `${task.title} block ended at ${format(new Date(new Date(event.start).getTime() + event.durationMinutes * 60_000), "HH:mm")}`}</p></div>
-            <div className="mt-2 flex flex-wrap gap-2 pl-5">
-              {type === "focus" ? <>
-                <button type="button" className="btn btn-gold h-7 px-2.5 text-[10px]" onClick={() => { respondToEventPrompt(event.id, "focus", "started"); onStartFocus?.(task.id, event.durationMinutes, event.id); }}>Start focus</button>
-                <button type="button" className="btn h-7 px-2.5 text-[10px]" onClick={() => respondToEventPrompt(event.id, "focus", "skipped")}>Not now</button>
-              </> : <>
-                <button type="button" className="btn btn-gold h-7 px-2.5 text-[10px]" onClick={() => { respondToEventPrompt(event.id, "completion", "done"); toggleComplete(task.id); }}>Yes, mark done</button>
-                <button type="button" className="btn h-7 px-2.5 text-[10px]" onClick={() => respondToEventPrompt(event.id, "completion", "not_done")}>Not yet</button>
-              </>}
-            </div>
-          </div>)}
-          {busy && <div className="flex justify-start"><div className="rounded-xl rounded-tl-sm bg-[var(--surface-2)] px-3.5 py-3 text-[11px] text-fg-subtle"><span className="mr-2 inline-block h-2 w-2 animate-pulse rounded-full bg-gold" />Thinking…</div></div>}
+          {pendingEventPrompts.map(({ type, event, task }) => <div key={`${type}-${event.id}`} className="mx-1 rounded-xl border border-[#e5c58e]/15 bg-[#151519]/90 px-3.5 py-3 text-[12px] leading-5 text-[#e8dfd2]"><div className="flex items-start gap-2"><AeviaArc size={15} className="mt-1" /><p>{type === "focus" ? `Focus block · ${task.title} at ${format(new Date(event.start), "HH:mm")}` : `${task.title} block ended at ${format(new Date(new Date(event.start).getTime() + event.durationMinutes * 60_000), "HH:mm")}`}</p></div><div className="mt-2 flex flex-wrap gap-2 pl-5">{type === "focus" ? <><button type="button" className="btn btn-gold h-7 px-2.5 text-[10px]" onClick={() => { respondToEventPrompt(event.id, "focus", "started"); onStartFocus?.(task.id, event.durationMinutes, event.id); }}>Start focus</button><button type="button" className="btn h-7 px-2.5 text-[10px]" onClick={() => respondToEventPrompt(event.id, "focus", "skipped")}>Not now</button></> : <><button type="button" className="btn btn-gold h-7 px-2.5 text-[10px]" onClick={() => { respondToEventPrompt(event.id, "completion", "done"); toggleComplete(task.id); }}>Yes, mark done</button><button type="button" className="btn h-7 px-2.5 text-[10px]" onClick={() => respondToEventPrompt(event.id, "completion", "not_done")}>Not yet</button></>}</div></div>)}
+          {busy && <div className="flex justify-start"><div className="inline-flex items-center gap-2 rounded-xl rounded-tl-sm border border-white/[0.05] bg-[#111216]/90 px-3.5 py-3 text-[11px] text-white/55"><AeviaArc size={18} state="thinking" />Thinking through your schedule…</div></div>}
         </div>
 
-        <div className="mt-5 grid grid-cols-2 gap-2">
-          <QuickAction icon={<CalendarDays size={13} />} label="Plan my day" onClick={planToday} />
-          <QuickAction icon={<AlertTriangle size={13} />} label="What’s at risk?" onClick={showRisks} />
-          <QuickAction icon={<CheckCircle2 size={13} />} label="Summarize today" onClick={summarizeDay} />
-          <QuickAction icon={<RotateCcw size={13} />} label="My day changed" onClick={() => { setRecoveryDescription(""); setRecoveryOpen(true); }} />
-        </div>
+        {messages.length > 0 && <div className="mb-2 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
+          {["Find time for a task", "Check for conflicts", "Summarize today", "My day changed"].map((prompt) => <button key={prompt} type="button" onClick={() => prompt === "Check for conflicts" ? showRisks() : prompt === "Summarize today" ? summarizeDay() : prompt === "My day changed" ? (setRecoveryDescription(""), setRecoveryOpen(true)) : choosePrompt(prompt)} className="shrink-0 rounded-full border border-white/[0.08] bg-white/[0.025] px-3 py-1.5 text-[9px] text-white/55 transition hover:border-[#dfc08c]/30 hover:text-[#f0e6d7]">{prompt}</button>)}
+        </div>}
 
         {planPreview && <PlanPreviewCard preview={planPreview} tasks={tasks} onApply={applyPlanPreview} onCancel={() => setPlanPreview(null)} />}
-        <form onSubmit={handleSubmit} className="mt-5 flex items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--bg)] p-2 pl-3 focus-within:border-[var(--ring)]">
-          <input value={request} onChange={(event) => setRequest(event.target.value)} className="min-w-0 flex-1 bg-transparent text-[11px] text-fg outline-none placeholder:text-fg-subtle" placeholder="Ask about your plan, or tell Aevia what to schedule…" aria-label="Ask Aevia about your schedule" />
-          <button disabled={!request.trim() || busy || Boolean(actionProposal)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--gold)] text-[#12100d] transition hover:brightness-110 disabled:opacity-40" aria-label="Send request to Aevia">{busy ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-r-transparent" /> : <ArrowUpRight size={15} />}</button>
+        <form onSubmit={handleSubmit} className="mt-2 flex shrink-0 items-center gap-2 rounded-[15px] border border-white/[0.1] bg-[#0b0c0f]/90 p-2 pl-3.5 shadow-[0_4px_22px_rgba(0,0,0,.18)] transition focus-within:border-[#dfc08c]/35">
+          <input ref={inputRef} value={request} onChange={(event) => setRequest(event.target.value)} className="min-w-0 flex-1 bg-transparent py-1 text-[11px] text-fg outline-none placeholder:text-white/35" placeholder={busy ? "Aevia is thinking…" : messages.length ? "Ask a follow-up…" : "Ask Aevia anything…"} aria-label="Ask Aevia about your schedule" />
+          <button disabled={!request.trim() || busy || Boolean(actionProposal)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(145deg,#eed0a2,#b9824c)] text-[#17120c] shadow-[0_2px_10px_rgba(221,174,112,.22)] transition hover:brightness-110 disabled:opacity-45" aria-label="Send request to Aevia">{busy ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-r-transparent" /> : <ArrowUpRight size={16} />}</button>
         </form>
-        <p className="mt-2 text-[9px] leading-4 text-fg-subtle">Ask about tasks, deadlines, your calendar, or free time. Aevia acts on your schedule data instead of making up an answer.</p>
       </div>
-    </section>
+    </section>;
+
+  return <>
+    {presentation === "window" && createPortal(<button type="button" aria-label="Close Aevia AI window" onClick={() => setWindowOpen(false)} className="fixed inset-0 z-[60] cursor-default bg-black/55 backdrop-blur-[2px]" />, document.body)}
+    {presentation === "window" ? createPortal(panel, document.body) : panel}
     <DayRecoveryModal open={recoveryOpen} onOpenChange={setRecoveryOpen} initialDescription={recoveryDescription} />
   </>;
 }
@@ -517,11 +625,4 @@ function PlanPreviewCard({ preview, tasks, onApply, onCancel }: {
       <button type="button" className="btn btn-gold h-7 px-2.5 text-[10px] disabled:opacity-40" onClick={onApply} disabled={!hasChanges}>Apply these changes</button>
     </div>
   </div>;
-}
-
-function QuickAction({ icon, label, onClick }: { icon: ReactNode; label: string; onClick: () => void }) {
-  return <button onClick={onClick} className="group rounded-lg border border-transparent px-2.5 py-2 text-left transition hover:border-[var(--border)] hover:bg-[var(--surface-2)]">
-    <span className="flex items-center gap-2 text-[10px] text-fg"><span className="text-gold">{icon}</span>{label}</span>
-    <span className="mt-1 block pl-[21px] text-[9px] text-fg-subtle">{label === "Plan my day" ? "Find room for tasks" : label === "What’s at risk?" ? "Check your deadlines" : label === "Summarize today" ? "See the day at a glance" : "Replan around a change"}</span>
-  </button>;
 }

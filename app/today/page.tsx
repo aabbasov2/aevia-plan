@@ -120,7 +120,7 @@ export default function TodayPage() {
           <TodayTasksPanel onFocusTask={(taskId) => { setFocusTaskRequest(taskId); document.getElementById("today-focus")?.scrollIntoView({ behavior: "smooth", block: "center" }); }} />
         </div>
         <div className="flex min-w-0 flex-col gap-4">
-          <TodayCommandPanel onStartFocus={(taskId, durationMinutes, eventId) => {
+          <TodayCommandPanel presentation="window" onStartFocus={(taskId, durationMinutes, eventId) => {
             setFocusTaskRequest(taskId);
             setFocusStartRequest({ taskId, durationMinutes, requestId: `${eventId}-${Date.now()}` });
           }} />

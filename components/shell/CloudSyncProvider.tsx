@@ -83,7 +83,9 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
       : null;
     const payload: Workspace = {
       tasks: state.tasks,
-      events: state.events,
+      events: state.events.map((event) => event.taskId && !taskIds.has(event.taskId)
+        ? { ...event, taskId: undefined }
+        : event),
       commitments: state.commitments,
       plannerPreferences: { ...state.plannerPreferences, timezone: state.plannerPreferences.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone },
       todayBackground: state.todayBackground,

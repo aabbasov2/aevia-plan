@@ -106,9 +106,12 @@ export function CreateEventModal({
             proposal={conflictProposal}
             onDismiss={() => onOpenChange(false)}
             onApply={() => {
-              applyConflictReplan(conflictProposal);
-              setConflictProposal(null);
-              onOpenChange(false);
+              const applied = applyConflictReplan(conflictProposal);
+              if (applied) {
+                setConflictProposal(null);
+                onOpenChange(false);
+              }
+              return applied;
             }}
           />
         ) : (

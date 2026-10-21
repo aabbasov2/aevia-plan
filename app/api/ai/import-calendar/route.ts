@@ -6,6 +6,7 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const EVENT_KINDS = ["meeting", "task", "focus"] as const;
 const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+const VISION_MODELS = ["qwen/qwen3.8-27b", "qwen/qwen3.6-27b"] as const;
 
 type EventKind = (typeof EVENT_KINDS)[number];
 type ExtractedEvent = {
@@ -19,10 +20,11 @@ type ExtractedEvent = {
 };
 
 const INSTRUCTIONS = [
-  "Act as a careful OCR reader for a calendar screenshot. Return JSON only, with an events array.",
-  "Read each individual colored event block inside the calendar's timed/hourly grid. Ignore only the distinct all-day banner row above the grid. Do not require labels to be perfectly sharp; preserve the readable part of a title and use the block's position on the time grid when its text does not show a time.",
+  "Act as a careful OCR reader for a calendar screenshot. Return JSON only, with an events array. Accuracy matters more than returning many events.",
+  "First identify the weekday/date column headers, the all-day event lane, and the timed grid using its hour labels and horizontal grid lines. Only extract colored blocks whose rectangles are visibly inside the timed grid. Ignore every all-day banner, including multi-day bars, even if it contains a readable title. Never convert an all-day banner into a 09:00-to-17:00 (or other timed) event.",
+  "Scan the calendar one date column at a time, from left to right, and inspect each timed-grid block from top to bottom. Include every timed block in each column, including narrow blocks and blocks that overlap other blocks. Transcribe each separate timed block once. Do not infer recurring events, fill gaps, or invent events based on patterns. Preserve readable title text; use a short partial title rather than guessing. If it is unclear whether a block is in the all-day lane or timed grid, omit it rather than assigning a guessed time.",
   "For each block return: title (string), weekday (full weekday name from its column), dayOfMonth (integer shown in that column header, or null), month (integer 1-12 only if visibly shown, otherwise null), year (integer only if visibly shown, otherwise null), startTime and endTime (24-hour HH:mm), confidence (0-1), and needsReview (boolean). Keep overlapping blocks as separate events. Do not combine neighboring blocks.",
-  "Use the time labels and grid lines to estimate block boundaries to the nearest 15 minutes. A readable event with an uncertain boundary is still useful: provide your best estimate and set needsReview=true. Return an empty events array only when there are no visible timed blocks.",
+  "Use the time labels and grid lines to estimate block boundaries to the nearest 15 minutes. Mark needsReview=true for uncertain titles or boundaries, and for any event lasting 4 hours or longer so the user can verify it is a timed block rather than an all-day banner. Return an empty events array only when there are no visible timed blocks.",
   "Do not calculate ISO dates. Aevia will resolve them from the visible weekday/day number and the user's current local date. Do not include all-day banners.",
 ].join(" ");
 
@@ -48,50 +50,56 @@ export async function POST(request: Request) {
   const today = typeof body.today === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.today) ? body.today : new Date().toISOString().slice(0, 10);
   let events: ExtractedEvent[] = [];
   const failures: string[] = [];
-
-  // Qwen 3.8 is the only configured Groq fallback-chain model with vision input.
-  try {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${groqKey}` },
-      body: JSON.stringify({
-        model: "qwen/qwen3.8-27b",
-        messages: [
-          { role: "system", content: `${INSTRUCTIONS}\nUser's current local date: ${today}.` },
-          { role: "user", content: [
-            { type: "text", text: "Transcribe the timed events from this calendar image." },
-            { type: "image_url", image_url: { url: `data:${body.mimeType};base64,${base64}` } },
-          ] },
-        ],
-        response_format: { type: "json_object" },
-        max_completion_tokens: 3072,
-        reasoning_effort: "none",
-      }),
-      signal: AbortSignal.timeout(25_000),
-    });
-    if (!response.ok) {
-      const detail = await response.json().catch(() => null);
-      failures.push(`Groq ${response.status}`);
-      console.warn("Calendar import Groq provider failed", response.status, detail?.error?.code ?? "unknown");
-      if (response.status === 401 || response.status === 403) {
-        return NextResponse.json({ error: "Groq rejected GROQ_API_KEY. Check the key in your environment and restart Aevia." }, { status: 502 });
+  for (const [index, model] of VISION_MODELS.entries()) {
+    try {
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${groqKey}` },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: `${INSTRUCTIONS}\nUser's current local date: ${today}.` },
+            { role: "user", content: [
+              { type: "text", text: "Transcribe the timed events from this calendar image." },
+              { type: "image_url", image_url: { url: `data:${body.mimeType};base64,${base64}` } },
+            ] },
+          ],
+          response_format: { type: "json_object" },
+          max_completion_tokens: 8192,
+          reasoning_effort: "none",
+        }),
+        signal: AbortSignal.timeout(25_000),
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => null);
+        const errorCode = typeof detail?.error?.code === "string" ? detail.error.code : "unknown";
+        failures.push(`${model}:${response.status}:${errorCode}`);
+        console.warn("Calendar import model failed", { model, status: response.status, code: errorCode, fallback: index < VISION_MODELS.length - 1 });
+        if (response.status === 401 || response.status === 403) {
+          return NextResponse.json({ error: "Groq rejected GROQ_API_KEY. Check the key in your environment and restart Aevia." }, { status: 502 });
+        }
+        continue;
       }
-    } else {
+
       const responseBody = await response.json();
       const candidate = parseModelJson(responseBody.choices?.[0]?.message?.content);
+      if (!isRecord(candidate) || !Array.isArray(candidate.events)) {
+        failures.push(`${model}:invalid_json`);
+        console.warn("Calendar import model returned invalid event data", { model, fallback: index < VISION_MODELS.length - 1 });
+        continue;
+      }
       events = normalizeEvents(candidate, today);
-      console.info("Calendar import Groq extraction", { eventCount: events.length });
+      console.info("Calendar import Groq extraction", { model, eventCount: events.length });
+      return NextResponse.json({ events });
+    } catch (error) {
+      const reason = error instanceof Error && error.name === "TimeoutError" ? "timeout" : "network_failure";
+      failures.push(`${model}:${reason}`);
+      console.warn("Calendar import model request failed", { model, reason, fallback: index < VISION_MODELS.length - 1 });
     }
-  } catch (error) {
-    failures.push(error instanceof Error && error.name === "TimeoutError" ? "Groq timeout" : "Groq network failure");
-    console.warn("Calendar import Groq request failed", error instanceof Error ? error.name : "unknown error");
   }
 
-  if (events.length > 0) return NextResponse.json({ events });
-  if (failures.length > 0) {
-    return NextResponse.json({ error: "Aevia's calendar reader is temporarily unavailable. Please try again in a moment." }, { status: 503 });
-  }
-  return NextResponse.json({ events: [] });
+  console.error("Calendar import exhausted vision models", { failures });
+  return NextResponse.json({ error: "Aevia's calendar reader is temporarily unavailable. Please try again in a moment." }, { status: 503 });
 }
 
 function parseModelJson(value: unknown): unknown {
@@ -116,9 +124,11 @@ function normalizeEvents(value: unknown, today: string): ExtractedEvent[] {
       if (durationMinutes < 5 || durationMinutes > 1440) durationMinutes = 0;
     }
     const kind = inferKind(raw.title, raw.kind);
-    const confidence = typeof raw.confidence === "number" && Number.isFinite(raw.confidence)
-      ? Math.max(0, Math.min(1, raw.confidence))
-      : 0.7;
+    const confidenceValue = raw.confidence;
+    const hasConfidence = typeof confidenceValue === "number" && Number.isFinite(confidenceValue);
+    const confidence = hasConfidence
+      ? Math.max(0, Math.min(1, confidenceValue))
+      : 0;
     return [{
       title: raw.title.trim().replace(/\s+/g, " ").slice(0, 180),
       date,
@@ -126,7 +136,7 @@ function normalizeEvents(value: unknown, today: string): ExtractedEvent[] {
       durationMinutes,
       kind,
       confidence,
-      needsReview: raw.needsReview === true || !startTime || durationMinutes === 0 || confidence < 0.65,
+      needsReview: raw.needsReview === true || !startTime || durationMinutes === 0 || !hasConfidence || confidence < 0.65 || durationMinutes >= 240,
     }];
   });
 }
